@@ -107,7 +107,7 @@ public class ReactorStreamCreateTest {
             .subscribe(System.out::println);
 
         //due to the nature of defer, fromStream will not throw exception now
-        Flux<String> stockSeq4 = Flux.defer(() -> Flux.fromStream(Stream.of(new String[]{"APPL", "AMZN", "TSLA"})));
+        Flux<String> stockSeq4 = Flux.defer(() -> Flux.fromStream(Stream.of("APPL", "AMZN", "TSLA")));
         stockSeq4.subscribe();
         stockSeq4.subscribe();
     }
@@ -117,6 +117,6 @@ public class ReactorStreamCreateTest {
         Flux.interval(Duration.of(1, ChronoUnit.SECONDS))
             .subscribe((t) -> log.info(String.valueOf(t)));
         log.info("Going to pause test thread, so that we don't end the test method before flux emits");
-        Thread.sleep(1000000);
+        Thread.sleep(10000);
     }
 }
