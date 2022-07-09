@@ -84,11 +84,11 @@ public interface Publisher<T> {
 
 规则:
 
-* Publisher向Subscriber发送onNext信号次数(调用onNext数量)不得超过订阅者请求的元素个数. 即如果请求3个元素不可以发送超过3个元素. -> 基础重要的原则, 保证了接受元素的先后顺序.
+* **Publisher向Subscriber发送onNext信号次数(调用onNext数量)不得超过订阅者请求的元素个数. 即如果请求3个元素不可以发送超过3个元素.** -> 基础重要的原则, 保证了接受元素的先后顺序.
 
 * 如果publisher失败, 需要调用onError告知订阅者. -> 订阅者有时间做错误处理, 资源清理等
 * Publisher.subscribe()内部必须调用onSubscribe(Subscriber s). onSubscribe通知订阅者该订阅已开始 -> 为了让Subscriber做好初始化, 开始准备接受后续元素.
-* 当前的Publisher允许同时存在多个Subscriber, 一个元素序列可以由一个发布者同时向多个订阅者进行发送, 类似广播 -> Publisher和Subscriber的关系: 1对n
+* **当前的Publisher允许同时存在多个Subscriber**, 一个元素序列可以由一个发布者同时向多个订阅者进行发送, 类似广播 -> Publisher和Subscriber的关系: 1对n
 
 ## Subscriber
 
@@ -138,11 +138,15 @@ onSubscribe, onNext, onError, onComplete
 
 规则: 
 
-* 为了收到onNext发送的信号, 订阅者必须调用Subscriptions.request(long n)来向发布者请求数据 -> 为了让订阅者决定什么时候和如何来处理上游传下来的元素, 确保他有足够的资源来进行处理. -> 并且规范推荐在力所能及的范围内, 每次请求尽可能多的元素. 相比较每次请求一个元素会更加有效率.
-
-* Subscriber的onComplete和onError, 不能够调用subscription或者是publisher上的任何方法 -> 为了防止在处理这两个终结信号的操作的时候, publisher和他们如果是在不同的线程上执行, 可能会出现一些静态条件
-* 如果当前的subscriber有活跃的订阅, 如果在接收了另外一个订阅上下文传送的onSubscribe方法时, 必须要去调用subscription.cancel来取消另外一个订阅 -> 保证的订阅者不会同时与多个发布者发生交互, 如果不这么做, 可能因为资源泄露而产生一些稀奇古怪的bug.
-* 即使订阅者已经调用subscription.cancel取消了当前的这个订阅, 仍有可能有onNext信号发送, 仍需做好准备 -> 因为调用cancel方法时, 发布者并没有保证他会立即执行, 可能发布者在真正的去处理这个取消订阅的操作之前依然会向下游去发送一些元素. 此时subscriber需要处理这些元素.
+* **为了收到onNext发送的信号, 订阅者必须调用Subscriptions.request(long n)**来向发布者请求数据
+  * 为了让订阅者决定什么时候和如何来处理上游传下来的元素, 确保他有足够的资源来进行处理.
+  * 规范推荐在力所能及的范围内, 每次请求尽可能多的元素. 相比较每次请求一个元素会更加有效率.
+* Subscriber的onComplete和onError, 不能够调用subscription或者是publisher上的任何方法
+  * 为了防止在处理这两个终结信号的操作的时候, publisher和他们如果是在不同的线程上执行, 可能会出现一些静态条件
+* 如果当前的subscriber有活跃的订阅, 如果在接收了另外一个订阅上下文传送的onSubscribe方法时, 必须要去调用subscription.cancel来取消另外一个订阅
+  * 保证的订阅者不会同时与多个发布者发生交互, 如果不这么做, 可能因为资源泄露而产生一些稀奇古怪的bug.
+* 即使订阅者已经调用subscription.cancel取消了当前的这个订阅, 仍有可能有onNext信号发送, 仍需做好准备
+  * 因为调用cancel方法时, 发布者并没有保证他会立即执行, 可能发布者在真正的去处理这个取消订阅的操作之前依然会向下游去发送一些元素. 此时subscriber需要处理这些元素.
 
 ## Subscription
 
@@ -184,7 +188,8 @@ Subscription: 表述当前发布者和订阅者之间的订阅关系的一个对
 规则:
 
 * request和cancel都必须在当前subscribe的上下文当中被调用, 确保发布者和订阅者关系的唯一性. 
-* subscription.request(long)最多请求2^63-1个元素, Java中long长整型的max_value. 基本可以把它看作是无限多个元素序列 -> 如果每一纳秒发送一个元素, 如果要发送这么多元素的话需要292年.
+* subscription.request(long)最多请求2^63-1个元素, Java中long长整型的max_value. 基本可以把它看作是无限多个元素序列
+  * 如果每一纳秒发送一个元素, 如果要发送这么多元素的话需要292年.
 
 ## Processor
 
@@ -208,19 +213,407 @@ public interface Processor<T, R> extends Subscriber<T>, Publisher<R> {
 
 ## 简介
 
+* 对响应式流规范的一种实现
+* Spring WebFlux默认的响应式框架
+
+* 完全异步非阻塞, 支持背压
+  * 在处理无限个元素时, 能够根据订阅者的消费速度来进行调节
+
+* 提供两个异步序列API: Flux[N]和Mono[0|1]
+  * Flux: 类比有很多元素组成的列表或者是数组.
+  * Mono: 类比相当于一个optional的类, 可以返回一个empty, 也可以返回一个唯一的一个值
+  * 例子: 一个HTTP请求只会产生一个回复. -> 应该表示成Mono更加贴切
+
+* 提供对响应式流的操作
+  * reactive stream, 注意区分jdk8中的stream. 包括选择, 过滤, 转换, 合并等
+
+## Flux和Mono
+
+### Flux
+
+<img src="img/reactive-study/flux.svg" alt="img" style="zoom: 80%;" />
+
+* Flux是一个标准的Publisher实现, 代表产生0到n个元素的异步序列. 
+* 这个序列可以被completion或error信号来终结. 对应到响应式流就是Subscriber上的onNext, onComplete和onError这三个方法. **这三个事件信号甚至包括结束信号其实都是可选**, 所以Flux用途也因此多种多样
+  * 如果我们不要用onNext, 但是就用了complete, 我们就得到了一个空的有限序列.
+  * 甚至连onComplete也不调用, 就拿到了一个空的无限序列. -> 更多用来做测试. 
+  * 更多情况下无限序列不会是空的, 例如: `Flux.interval(Duration) -> Flux<Long>`. 产生`Flux<long>`类型的无限序列, 按照设置的duration时钟按时产生元素
+
+### Mono
+
+<img src="img/reactive-study/mono.svg" alt="img" style="zoom:80%;" />
+
+Mono产生至多一个元素的异步序列, 然后通过调onComplete信号来结束整个调用
+
+注意:
+
+**在Mono中, 如果已经调用onNext的话, 不能够再去调用onError的, 只能二选一**(reactor框架的限制)
+
+如果已经调用了onNext, 那么不管mono有没有返回值, 他是调用成功了. 如果这个时候再去调用onError的方法, 那么这个mono的状态到底是成功还是失败就没有办法确定了
+
+## 流的创建
+
+* 项目依赖
+* 创建流的工厂方法实例和注意事项
+
+### pom依赖
+
+```xml
+<dependency>
+    <groupId>io.projectreactor</groupId>
+    <artifactId>reactor-core</artifactId>
+    <version>3.3.18.RELEASE</version>
+</dependency>
+<dependency>
+    <groupId>io.projectreactor</groupId>
+    <artifactId>reactor-test</artifactId>
+    <version>3.3.18.RELEASE</version>
+</dependency>
+
+<dependency>
+    <groupId>org.junit.jupiter</groupId>
+    <artifactId>junit-jupiter-api</artifactId>
+    <version>5.7.2</version>
+    <scope>test</scope>
+</dependency>
+
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <version>1.18.20</version>
+</dependency>
+<dependency>
+    <groupId>org.slf4j</groupId>
+    <artifactId>slf4j-api</artifactId>
+    <version>1.7.30</version>
+</dependency>
+<dependency>
+    <groupId>ch.qos.logback</groupId>
+    <artifactId>logback-core</artifactId>
+    <version>1.2.3</version>
+</dependency>
+<dependency>
+    <groupId>ch.qos.logback</groupId>
+    <artifactId>logback-classic</artifactId>
+    <version>1.2.3</version>
+</dependency>
+```
+
+关于流的创建, 拿股价的订阅系统为例, 生成一个股票代码的流. 首先需要考虑是使用Flux还是Mono, 因为不止一只股票, 所以要使用Flux来创建, 代表多余一个元素的序列.
+
+### Flux.just
+
+<img src="img/reactive-study/justMultiple.svg" alt="img" style="zoom:80%;" />
+
+Create a `Flux` that emits the provided elements and then completes.
+
+只要把所有的元素全部扔进去, 然后他就可以生成一个序列
+
+```java
+public void fluxJust() {
+    Flux<String> stockSequence1 = Flux.just("APPL", "AMZN", "TSLA");
+}
+```
+
+### Flux.fromIterable
+
+<img src="img/reactive-study/fromIterable.svg" alt="img" style="zoom:80%;" />
+
+Create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) that emits the items contained in the provided [`Iterable`](https://docs.oracle.com/javase/8/docs/api/java/lang/Iterable.html?is-external=true). The [`Iterable.iterator()`](https://docs.oracle.com/javase/8/docs/api/java/lang/Iterable.html?is-external=true#iterator--) method will be invoked at least once and at most twice for each subscriber.
+
+从实现的Java的Iterable interface的一些类, 链表之类创建流
+
+```java
+public void fluxFromIterable() {
+    Flux<String> stockSeq2 = Flux.fromIterable(Arrays.asList("APPL", "AMZN", "TSLA"));
+}
+```
+
+### Flux.fromArray
+
+![img](img/reactive-study/fromArray.svg)
+
+Create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) that emits the items contained in the provided array.
+
+```java
+public void fluxFromArray() {
+    Flux<String> stockSeq3 = Flux.fromArray(new String[]{"APPL", "AMZN", "TSLA"});
+}
+```
+
+### Flux.fromStream
+
+ Create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) tha t emits the items contained in the provided [`Stream`](https://docs.oracle.com/javase/8/docs/api/java/util/stream/Stream.html?is-external=true). Keep in mind that a [`Stream`](https://docs.oracle.com/javase/8/docs/api/java/util/stream/Stream.html?is-external=true) **cannot be re-used**, which can be problematic in case of multiple subscriptions or re-subscription (like with [`repeat()`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#repeat--) or [`retry()`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#retry--)). The [`Stream`](https://docs.oracle.com/javase/8/docs/api/java/util/stream/Stream.html?is-external=true) is [`closed`](https://docs.oracle.com/javase/8/docs/api/java/util/stream/BaseStream.html?is-external=true#close--) automatically by the operator on cancellation, error or completion.
+
+务必注意, 此处的Stream不可以被重复使用. 就是说如果已经对这个序列已经订阅了一遍, 如果再去订阅第二遍的时候是会有问题的. 因为对于jdk8的来说, Stream它只能被打开一次, 如果他已经被操作过之后, Stream会被关闭, 所以当你再去操作第二遍的时候, 他就会抛出来一个错误.
+
+```java
+@Test
+public void fluxFromStream() {
+    Flux<String> stockSeq4 = Flux.fromStream(Stream.of(new String[]{"APPL", "AMZN", "TSLA"}));
+    stockSeq4.subscribe();
+    stockSeq4.subscribe(); //can only subscribe once! will throw error
+}
+```
+
+运行后抛出错误
+
+```
+reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.IllegalStateException: stream has already been operated upon or closed
+Caused by: java.lang.IllegalStateException: stream has already been operated upon or closed
+```
+
+### Flux.empty
+
+![img](img/reactive-study/empty.svg)
+
+Create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) that completes without emitting any item.
+
+返回一个空序列
+
+```java
+public void fluxEmpty() {
+    Flux<String> stockSeq5 = Flux.empty(); //generic type still honored
+}
+```
+
+返回的是一个空的一个序列, 但是因为这边已经定义了一个泛型String, 他依然是能够尊重我们这个约束, 返回一个String泛型的序列.
+
+### Flux.range
+
+<img src="img/reactive-study/range.svg" alt="img" style="zoom:80%;" />
+
+Build a Flux that will only emit a sequence of count incrementing integers, starting from start. That is, emit integers between **start (included) and start + count (excluded)** then complete.
+
+```java
+public void fluxRange() {
+    // 5, 6, 7
+    Flux<Integer> numbers = Flux.range(5, 3);
+}
+```
+
+(起始值, 数量)
+
+### Flux.generate
+
+![img](img/reactive-study/generateStateless.svg)
+
+Programmatically create a Flux by generating signals one-by-one via a consumer callback.
+
+```java
+public void fluxGenerate() {
+    //synchronous, one-by-one
+    Flux<Long> flux = Flux.generate(
+        AtomicLong::new,
+        (state, sink) -> {
+            long i = state.getAndIncrement();
+            // sink序列号发送出去
+            sink.next(i);
+            if (i == 10) sink.complete();
+            return state;
+        },
+        // 可以把数据库连接关闭等操作放在这里
+        (state) -> System.out.println("I'm done")
+    );
+    flux.subscribe(System.out::println);
+}
+```
+
+* 同步的方法, 并且每次generate只能有一个信号发送的操作
+  * 意味着在每次的generate里面不能调用多余一次的next方法, (因为一个next就是一个信号的发送), 否则它就会报错
+* 有一个state来让你去根据当前的状态来决定下一个发送的元素是什么
+
+源代码:
+
+```java
+public static <T, S> Flux<T> generate(Callable<S> stateSupplier, BiFunction<S, SynchronousSink<T>, S> generator, Consumer<? super S> stateConsumer) {
+    return onAssembly(new FluxGenerate<>(stateSupplier, generator, stateConsumer));
+}
+```
+
+* stateSupplier: 初始化. 示例中是序列号生成器Flux写法. called for each incoming Subscriber to provide the initial state for the generator bifunction
+
+* generator: Consume the SynchronousSink provided per-subscriber by Reactor as well as the current state to generate a single signal on each pass and return a (new) state.
+
+* stateConsumer: 可以把数据库连接关闭等操作放在这里. called after the generator has terminated or the downstream cancelled, receiving the last state to be handled (i.e., release resources or do other cleanup).
+
+ ### Flux.create
+
+<img src="img/reactive-study/createForFlux.svg" alt="img" style="zoom:80%;" />
+
+Programmatically create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) with the capability of emitting multiple elements in a synchronous or asynchronous manner through the [`FluxSink`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/FluxSink.html) API. This includes emitting elements from multiple threads.
+
+* 相比较generate是异步的操作, 可以有多于一个next方法的回调
+* 不想更generate, 没有state
+* 一般的用途是把其他的一些异步的API, 比如说一些listener集成到reactor框架里面
+
+```java
+Flux<String> stockSeq6 = Flux.create((t) -> {
+    t.next("APPL");
+    t.next("AMZN");
+    t.complete();
+});
+// 更有意义的例子
+Flux<String> stockSeq7 = Flux.create(sink -> {
+    //pretend we are registering a listener here
+    new MyDataListener() {
+        public void onReceiveData(String str) {
+            sink.next(str);
+        }
+
+        public void onComplete() {
+            sink.complete();
+        }
+    };// 下游背压策略
+}, FluxSink.OverflowStrategy.DROP);
+
+public class MyDataListener {
+    public void onReceiveData(String str) {
+        //do something
+    }
+
+    public void onComplete() {
+        //do something
+    }
+}
+```
+
+MyDataListener中两个回调, onReveiceData和onComplete, 
+
+```java
+public static <T> Flux<T> create(Consumer<? super FluxSink<T>> emitter, OverflowStrategy backpressure) {
+    return onAssembly(new FluxCreate<>(emitter, backpressure, FluxCreate.CreateMode.PUSH_PULL));
+}
+```
+
+This Flux factory is useful if one wants to adapt some other multi-valued async API and not worry about cancellation and backpressure (which is handled by buffering all signals if the downstream can't keep up).
+
+emitter: Consume the {@link FluxSink} provided per-subscriber by Reactor to generate signals.
+
+backpressure: 背压策略
+
+背压策略如下:
+
+```java
+enum OverflowStrategy {
+    /**
+* Completely ignore downstream backpressure requests.
+* <p>
+* This may yield {@link IllegalStateException} when queues get full downstream.
+*/
+    IGNORE,
+    /**
+* Signal an {@link IllegalStateException} when the downstream can't keep up
+*/
+    ERROR,
+    /**
+* Drop the incoming signal if the downstream is not ready to receive it.
+*/
+    DROP,
+    /**
+* Downstream will get only the latest signals from upstream.
+*/
+    LATEST,
+    /**
+* Buffer all signals if the downstream can't keep up.
+* <p>
+* Warning! This does unbounded buffering and may lead to {@link OutOfMemoryError}.
+*/
+    BUFFER
+}
+```
+
+IGNORE: 忽略背压, 都给下游, 崩掉算了
+
+ERROR: 下游消费过慢, 抛出error
+
+DROP: 下游消费过慢, drop掉, 不发送给下游
+
+LATEST: 下游只会拿到上游最新的信号
+
+BUFFER: 默认策略, 下游消费过慢会放到缓存, 注意是无限增长, 可能oom
+
+### Flux.defer
+
+<img src="img/reactive-study/deferForFlux.svg" alt="img" style="zoom:80%;" />
+
+Lazily supply a [`Publisher`](https://www.reactive-streams.org/reactive-streams-1.0.3-javadoc/org/reactivestreams/Publisher.html?is-external=true) every time a [`Subscription`](https://www.reactive-streams.org/reactive-streams-1.0.3-javadoc/org/reactivestreams/Subscription.html?is-external=true) is made on the resulting [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html), so the actual source instantiation is deferred until each subscribe and the [`Supplier`](https://docs.oracle.com/javase/8/docs/api/java/util/function/Supplier.html?is-external=true) can create a subscriber-specific instance. If the supplier doesn't generate a new instance however, this operator will effectively behave like [`from(Publisher)`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#from-org.reactivestreams.Publisher-).
+
+直到一个订阅Subscription生成之后才会懒加载(Lazily supply)一个publisher, 换句话说就是这个源的实例化会被推迟到subscriber方法调用之后, 并且只有在这个时候, 他才会通过调用我们给的suppler方法(在这边就是我们一个lambda定义的`() -> Flux.just("APPL", "AMZN", "TSLA")`)对每一个subscriber都有每一个数据源
+
+```java
+public void fluxDefer() {
+    Flux.defer(() -> Flux.just("APPL", "AMZN", "TSLA"))
+        .subscribe(System.out::println);
+
+    //due to the nature of defer, fromStream will not throw exception now
+    Flux<String> stockSeq4 = Flux.defer(() -> Flux.fromStream(Stream.of(new String[]{"APPL", "AMZN", "TSLA"})));
+    stockSeq4.subscribe();
+    stockSeq4.subscribe();
+}
+```
+
+这边的一个例子啊, 就是我们在之前在`Flux.fromStream`里面去生成的时候去重复订阅多次(多次subscribe())的话, 会抛一个异常. 如果这个时候我在外面去包了一层`Flux.defer`推迟操作的话, 那后面再去订阅的时候, 就不会报错了
+
+* 因为两次subscribe, 他每一次都会要用这个supply方法, 从而生成一个新的flux. 所以也就是说其实我这两个Subscriber订阅的流并不是一个, 而是每次通过supplier的方法独立调用出来的一个flux. 所以这个时候如果订阅两遍就没有问题了.
+
+```java
+public static <T> Flux<T> defer(Supplier<? extends Publisher<T>> supplier) {
+   return onAssembly(new FluxDefer<>(supplier));
+}
+```
+
+supplier: supplier – the Publisher Supplier to call on subscribe
+
+### Flux.interval
+
+![img](img/reactive-study/interval.svg)
+
+Create a [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) that emits long values starting with 0 and incrementing at specified time intervals on the global timer. The first element is emitted after an initial delay equal to the `period`. If demand is not produced in time, an onError will be signalled with an [`overflow`](https://projectreactor.io/docs/core/release/api/reactor/core/Exceptions.html#isOverflow-java.lang.Throwable-) `IllegalStateException` detailing the tick that couldn't be emitted. In normal conditions, the [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) will never complete.
+
+Runs on the [`Schedulers.parallel()`](https://projectreactor.io/docs/core/release/api/reactor/core/scheduler/Schedulers.html#parallel--) Scheduler.
+
+定义一个Duration, 然后会按照这个时间间隔按时发送元素.
+
+这里用`Thread.sleep`避免测试方法过早退出
+
+```java
+Flux.interval(Duration.of(1, ChronoUnit.SECONDS))
+    .subscribe((t) -> log.info(String.valueOf(t)));
+log.info("Going to pause test thread, so that we don't end the test method before flux emits");
+Thread.sleep(1000000);
+```
+
+运行结果
+
+```
+20:13:02.990 [main] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+20:13:03.010 [main] INFO ReactorStreamCreateTest - Going to pause test thread, so that we don't end the test method before flux emits
+20:13:04.026 [parallel-1] INFO ReactorStreamCreateTest - 0
+20:13:05.016 [parallel-1] INFO ReactorStreamCreateTest - 1
+20:13:06.014 [parallel-1] INFO ReactorStreamCreateTest - 2
+20:13:07.011 [parallel-1] INFO ReactorStreamCreateTest - 3
+```
+
+每隔一秒钟吐出一个元素, 然后通过log方法去把它打印出来
+
+注意:
+
+这里面的subscribe方法所运行的线程是parallel-1.
+
+然后这个测试方法(就是打log的这个`log.info`)是我们的主线程. 
+
+从这里可以大概看到整个reactor就是一个默认异步非阻塞的实现. 他的subscribe方法都会在另外一个单独的线程里面去跑
+
+具体reactor框架中的线程模型. 留到后面再来讲. -> 
 
 
 
 
 
+---
 
-
-
-这样, 大家好, 欢迎来到这个小节的学习, 在上个小节呢, 我们对响应式流的jbm规范和标准进行了一个分析, 那么在今天这个小节我们就要进入对API实现类库的一个介绍. 在这里呢, 我们选择的内裤是project reactor, 他是响应是流规范的其中的一种实现, 当然了你也可以用JAVA或者是vertex来替代. 但是为了保持简洁明了, 我们在这里呢就先从reactor来进行讲解, 因为他是spring默认的响应式的框架. Reactor是完全非阻塞的一个框架, 并且呢他在处理无限个元素时, 能够根据订阅者的消费速度来进行调节. 也就是我们之前提到的被压reactor提供两个异步1212就类似于一个有很多元素组成的列表或者是数组, mono呢相当于一个optional的类. 它可以返回一个mt, 也可以返回一个唯一的一个值, 这个就从语意上区分的这两个序列所包含的元素的个数. 比如说如果是一个HTTP请求的话, 它只会产生一个回复. 所以这个时候呢, 你把它表示成一个model, 就比flux要更贴切一点. 同时react这个框架也提供了大量对呃响应是流的操作服务. 大家注意啊, 这个指的是reactive stream的响应式流, 跟我们在前面一张提到的jk八中的一定要区分开, 不要弄混了. 这些操作呢包括选择, 过滤, 转换, 合并等等. 我们在下一章节的实战环节中呢也会接触到这些操作服. 在这个小节的最后呢, 我们来稍微多聊两句关于flux和moo. 是一个标准的, 它配设实现它代表产生零到n个元素的异步序列. 这个序列可以选择被或者是arrow信号来终结这几个信号, 大家联想一下, 对应到响应式流中间什么事件呢？就是订阅者上的. 和on error这三个方法, 因为这三个事件信号甚至包括结束信号其实都是可选, 那么flux的用途也因此是多种多样的. 如果我们不要用nex, 但是就用了complete, 我们就得到了一个空的有限序列. 如果甚至连的也不调用的, 那就拿到了一个空的无限血液, 当然了这个序列可能啊平时除了做测试以外, 并没有什么其用处, 更多的情况下无限的序列不会是空的. 比如说你用flux点啊给定一个duration, 它会产生一个long类型的一个无距离, 那么他会按照你设置的duration根据时钟的摆动来去. 按时产生这样一个元素, mono是一个稍微特殊一点的实现, 再调用信号的时候, 它最多会产生一个元素. 然后呢通过调运行的信号来结束这个整个调用, 但是在这里面大家记住一点. 对于猫来说, 如果你已经占用了的话, 是不能够再去调用on error的. 为什么呢？大家设想一下, 如果我已经调用了, 那么不管这个朋友有没有返回值, 他是调用成功了. 如果这个时候我再去调用一个的方法, 那么这个mono的状态到底是成功还是失败了呢？这个是没有办法确定的, 所以pr小节ect reactor他呃这个框架对于mono的话, 他追加了一个限制, 就是说你的调用和的话只能二选1, 
-
-## 流的构建
-
-进入对于reactor的框架的实战环节, 同学们可以暂停一下视频, 然后打开你的ide, 然后我们在这一小节呢会首先着重去讲一下关于流的一个构建. 在构建流里面呢, 我们呃首先会简单的去讲一下这个项目会有哪些依赖. 然后另外的话, 我会在大家详细的去过一些关于创建的流的一些工厂方法的一些实例和一些注意事项, 在在在这里也可以看到我已经打开了这个实战的项目, 然后呢打开的这个泡沫的什么来给大家讲一下这个项目会有哪一些没稳依赖啊？首先第一个最重要的它是一个reactor, 这个的话就包含了关于这个reactor的是框架的一些非常重要的一些事情, 比如说flux这样的. 然后剩下来的两, 接下来两个是关于这个项目构建的一些测试类. 一个人tesju五这样的啊, 这两个测试的一个依赖啊, 接下来第四个呢是一个long, 这个主要是帮助我们去简单的去书写一些啊LOGO啊, 日志这样的一些记录啊, 去去让代码去看的比较简洁一些. 最后的话就是一个关于一些日志的一些依赖啊, 为了保证保持跟之前的一个一致吧, 我们这边的话还是用cg这样的一个API来进行一个日志的输出啊, 然后他底层的实现的话, 依然会使用log卡来进行, 所以我们加入了两个log的依赖在这里. 嗯, 这边呢关于流的创建, 我们会就拿我们的股价的订阅系统来举个例子吧, 如果我们要想去生成一个股票代码的流. 对, 然后基于这样一个目的, 我们有不同的创建方法来去构造一下. 呃, 那么首先我们要考虑一个问题, 就是我们应该是用struts还是大家想我们哪一个呢？啊, 因为我们这边有不止一只股票, 我可能有100个, 1000个甚至上万个呃股票的代码. 那么这里呢我们就不能, 我们需要用来代表这样多于一个元素的. 一个序列也就是我们这边的股票代码的一个流啊, 那么首先最简单的话, 我们就是用x的方法来去做驾驶方法呢, 它就是你只要把所有的元素全部扔进去, 然后他就可以生成一个, 生成一个序列. 这个就比较简单啊, 后面两个的话, 第一个是双双的话, 就是从实的JAVA的一个的这样一个interface的一些类, 比如说像链表啊或者之类的, 他就可以把它创建成一个流. 第三个的话就是从数组来创建这样一个流, 第四个是从来创建一个流就, 就是从我们JAVA的jdc八里面介绍出来的那个创建一个旅游啊, 大家这边一定要注意一点, 就是他这个文档里面其实也有些就是说这个是不能被重复使用的. 什么意思呢？就是说如果我这边已经对这个序列区已经订阅了一遍的话, 如果我再去订阅第二遍的时候是会有问题的. 大家想这是为什么呢？因为在jk八的来说, 这个当它只能被打开一次, 如果他已经被操作过之后, 这个人这是会, 所以当你再去操作第二遍的时候, 他就会抛出来一个错误. 我们来跑一下, 看看他会跑什么错误. 他都会看到他抛了一个一, 然后告诉你这个流已经被操作过了, 或者是已经被关掉了, 那么这个时候大家也就一, 对于这样一个操作来说的话, 尽量避免去订阅超过一, 我们接着往下看, 这边的话是有一个flux empty啊, 大家这边注意一下的话, 它返回的是一个空的一个序列, 但是呢因为我们这边已经定义了一个泛请就是一个那么他依然是能够尊重我们这个约, 然后返回一个string泛显的. 好, 这样一个呃一个序列. 接下来呢是一range方, 呃, 这个方法的话它会拿两个参数, 第一个参数是它的起始值, 这里面我们给的是五, 然后第二个值呢就是它的数量. 我们这边如果给三的话, 那么这个flux里面就会包括三个元素, 分别是五六. 七到期之后他就终止了, 下面是杰瑞的方法, 杰瑞的方法呢它是一个同步的方法. 并且每次generate只能有一个信号发送的操作, 这个意味着什么呢？这个意味着你在每次的generate里面不能调用多余一次的方法, 因为一个nex就是一个信号的发送, 否则它就会报错. 这个职位的方法比较有用的呢是他有一个state来让你去根据当前的状态来决定下一个发送的元素是什么, 我们来看看他的那个一个方法的. 这边的话他会有一个state, 一个generator和一个state那么这个就是这个初始化, 你要把这个c去进行一下初始化. 啊, 我们这边的话是写了一个呃序列号生成器的这样一个flux的写法. , 那么首先我会序列化这个state. , 把它设成了tommy的话, 不给这就是一个零, 那么对于瑞的方法呢, 我们每次去拿到当前的这个and就是把它增加一啊, 然后我再通过这个把这当做一个序列号发送出去. 呃, 当我发送了十个之后呢, 然后我就会把这个整个的这个刷词生成给关掉, 那么在最后我会定义一个consumer来告诉程序啊, 我这边已经结束了我这个整个的一个福克斯的生长就完全结束了. 这边比较有用的这个c consumer就是说如果你有一些数据库的连接在这个里面的话, 你可以把这个数据库关闭, 连接的操作放在这里. 这样的话就当你的呃整个flux结束的时候, 你就可以在这边进行一些关闭的一些操作, 大家看这个方法其实它比较有点像JavaScript里面的ray的那个或者是JAVA API里面的. 这个方法也是拿到一个初始状态, 然后进行一些操作, 然后拿了一个状态. 下面flux的方法, 它相比较来说的话, 它是一个异步的一个操作, 所以呢它可以有多于一个. 呃, 方法的一个回家, 他的一般的用途是把其他的一些异步的API, 比如说一些listener给集成到的框架里面了. 当然了, 我们也可以简单的去写这样一个序列, 就是去生成一个, 然后去通过去调用. 怎么来？北京两个不同的股票代码, 然后去把它关闭掉, 这样写也是没有问题的, 呃, 但是给大家来看一个更加有意义点的一个例子吧, 就是说我写了这样一个listener. 这个对他的死哪儿了？他有两个方法, 就是我会有一个回调去呃对这个拿到的数据进行一个处理, 然后另外呢我去就是当我的这个类似的调用完成之后去做一些事, 那么对于这样一个lister, 如果我要把它reactor方法里面要去怎么样去操作呢？我就可以用到的方法了, 首先这个可以怎会要定义一个sink？这个就是一个. 啊大家, 大家注意啊, 这边不像它里面是没有的, 他们拿到一个性格之后, 这个时候我可以我可以定义我的这样一个呃类似的, 一般的话, 我这边会去把我的register注册到另外一某一样某个服务上面. 然后我在这边定义, 当我接收到这个data之后我会做什么？这边的话我就会向下游去发送, 我接收到数据. 如果我结束的话, 那么那我会告诉我的, 这个think我这边已经结束调用了, 你可以关闭了这个flux. 就是大概是这样一个操作, 在这个create的方法的后面呢, 他其实会配合. 参数就是一个overflow的一strategy, 这个其实就是一个下游的一个被压的一个策略. 我们稍微花一点时间来看一下他经历了哪些策略啊？这个被压的策略呢, 呃, 大家看到它定义的有五个不同的策略. 首先第一个的话是一个这个一个弄的就是我忽略下雨的北洋, 就是我会就直接一股脑把所有东西全部扔给下雨. 啊, 如果我崩掉的话就算了, 第二个方法, 第二个策略的是如果下游消费过慢的时候呢, 他会抛出一个这样一个第三个是drop的意思就是说当你下游消费过慢的时候呢, 我就把我的这个信号的发送给做掉. 我就不发送给下游啊, 然后的意思是下游啊只会拿到上有发送的最新的一个信号. 这样的话, 如果你是一个实时的信息流的话, 用会是比较好的一个策略, 然后最后一个就是一个八分, 八分就是一个默认的一个策略啊, 如果当下游消费我慢的话, 它会存进这样一个buff一个缓存里面. 大家要注意的是在这里这个buffer的他是会无限增长的, 如果你一直消费不及时, 然后这个把分一直累积的话, 它会造成你内存的一个溢出, 所以千万要小心当地去使用这样一个在生长环境去使用这个策略的时候. 下面是flux的一个缝方法, 这个份儿方法呢它是制造一个呃就是一个订阅生成之后它才会去懒加载, 就是supply一个publisher. 换句话说就是这个圆的实力化会被推迟到你的方法调用之后. 并且只有在这个时候, 他才会通过调用我们给的这个方法在这边就是我们一个拉姆达定义的. Supply方法来对每个都有一个对应的一个数据源. 这边我又写了一个例子啊, 就是我们之前在之前在那个方法里面去生成的时候去重复订阅多次的话, 会抛一个异常. 那么大家啊来想一想, 如果这个时候我在外面去包了一层缝推迟操作的话, 那我后面再去订阅的时候, 他还会报错吗？我来公布答案, 在这个时候他是不会报错的. 因为什么呢？因为我们是两次, 他每一次都会要用这个supply方法, 从而生成一个新的flux. 所以也就是说其实我这两个他订阅的流并不是一个, 而是每次我通过supplier的方法独立调用出来的一个呃一个flux. 所以这个时候如果我订约两边就没有问题了. 那么最后一个方法呢是因切过方法这个林成果方法, 大家可能在之前的四爱的里面也有看到过, 就是说我这边会定义一个, 然后他会按照这个时间间隔来按时去发出这样一个元, 这里面呢我们需要用点, 然后这个让这个当前的这个测试方法呢就是去进, 避免他这个测试方法去过早的退出, 我们来运行一下, 看一下能跑出来的结果. 大家看到他这边话, 每隔一秒钟他就会去. 老外突出一个元素, 然后我们这边通过定点方法去把它打印出来, 在这里面呢. 大家不知道你咋有没有注意啊？这里面的这个方法所运行的线程是parallel-1. 然后呢我们这个测试方法就是我打log的这个呃这个线. 他是我们的主线程. 从这里大家可以大概看到就是整个reactor, 他就是一个默认异步非注册的视线. 就是他的方法都会在另外一个单独的一个县城里面去跑具体rex框架里面的现场模型的. 我们就稍微卖个关子, 留到后面再来讲. 
+那么最后一个方法呢是因切过方法这个林成果方法, 大家可能在之前的四爱的里面也有看到过, 就是说我这边会定义一个, 然后他会按照这个时间间隔来按时去发出这样一个元, 这里面呢我们需要用点, 然后这个让这个当前的这个测试方法呢就是去进, 避免他这个测试方法去过早的退出, 我们来运行一下, 看一下能跑出来的结果. 大家看到他这边话, 每隔一秒钟他就会去. 老外突出一个元素, 然后我们这边通过定点方法去把它打印出来, 在这里面呢. 大家不知道你咋有没有注意啊？这里面的这个方法所运行的线程是parallel-1. 然后呢我们这个测试方法就是我打log的这个呃这个线. 他是我们的主线程. 从这里大家可以大概看到就是整个reactor, 他就是一个默认异步非注册的视线. 就是他的方法都会在另外一个单独的一个县城里面去跑具体rex框架里面的现场模型的. 我们就稍微卖个关子, 留到后面再来讲. 
 
 ## 流的操作
 
@@ -276,7 +669,7 @@ public interface Processor<T, R> extends Subscriber<T>, Publisher<R> {
 
 * [慕课网-Spring Boot2.0深度实践之核心技术篇](https://coding.imooc.com/class/chapter/252.html#Anchor) -> 书本《Spring Boot编程思想(核心篇)》小马哥著
 
-
+* [ch5-reactor](https://github.com/ruoshuixuelabi/spring-five-course/tree/master/ch5-reactor)
 
 
 
