@@ -1339,11 +1339,260 @@ public void schedulerParallel() {
 
 讲完了关于响应式流的执行线程的配置, 也就是通过定义不同的schedule, 其中使用了subscriberOn, 下一节来看一下是什么
 
-## publisherOn和subscriberOn
+## publishOn和subscribeOn
 
 reactor框架提供了两种方法来**改变执行的上线文**, 分别是subscriberOn(schedule)和publisherOn(schedule). 
 
 他们都会接受一个schedule的作为入参, 并且把执行的上下文切换到传入的schedule上
+
+### subscribeOn
+
+<img src="img/reactive-study/subscribeOnForFlux.svg" alt="img" style="zoom:80%;" />
+
+Run subscribe, onSubscribe and request on a specified [`Scheduler`](https://projectreactor.io/docs/core/release/api/reactor/core/scheduler/Scheduler.html)'s [`Scheduler.Worker`](https://projectreactor.io/docs/core/release/api/reactor/core/scheduler/Scheduler.Worker.html). As such, placing this operator anywhere in the chain will also impact the execution context of onNext/onError/onComplete signals from the beginning of the chain up to the next occurrence of a [`publishOn`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#publishOn-reactor.core.scheduler.Scheduler-).
+
+Note that if you are using an eager or blocking [`create(Consumer, FluxSink.OverflowStrategy)`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#create-java.util.function.Consumer-reactor.core.publisher.FluxSink.OverflowStrategy-) as the source, it can lead to deadlocks due to requests piling up behind the emitter. In such case, you should call [`subscribeOn(scheduler, false)`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#subscribeOn-reactor.core.scheduler.Scheduler-boolean-) instead.
+
+作用在上subscription process上的, 也就是在发起订阅的流程上, 什么时候发起订阅? 当调用subscribe的时候就发起了订阅, 所以不管把subscriberOn放在定义Flux的什么位置, 都不会影响他的效果, 因为最后都是会作用在subscribe的动作上
+
+```java
+public void simpleSubscribeOn() throws InterruptedException {
+    Scheduler s = Schedulers.newElastic("subscribeOn-demo-elastic");
+    Flux<Integer> flux = Flux.range(1, 4)
+        .filter(i -> {
+            log.info("filter in thread {}", Thread.currentThread().getName());
+            return i % 2 == 0;
+        })
+        .subscribeOn(s)
+        .map(i -> {
+            log.info("map in thread {}", Thread.currentThread().getName());
+            return i + 2;
+        });
+    Thread t = new Thread(() -> {
+        log.info("start current thread");
+        flux.subscribe(i -> log.info(String.valueOf(i)));
+        log.info("end current thread");
+    });
+    t.start();
+    t.join();
+}
+```
+
+```
+19:39:53.335 [Thread-1] INFO scheduler.StreamScheulderNewTest - start current thread
+19:39:53.351 [Thread-1] INFO scheduler.StreamScheulderNewTest - end current thread
+19:39:53.354 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - map in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - 4
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - map in thread subscribeOn-demo-elastic-2
+19:39:53.356 [subscribeOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - 6
+```
+
+这里定义的一个比较简单的subscribeOn的这个方法.
+
+定义一个流, 并且当他在filter的操作之后, 指定了要去通过这个s这个schedule, 来对他进行一个subscribeOn. 
+
+这样就相当于告诉程序, 当在发起我这个订阅操作subscribe的时候, 请你把这个执行上下文交给到我的这个Scheduler s. 所以即使程序中subscribeOn动作是从我们的这个匿名的这个线程去发起, 当跑这个程序的时候, 依然是看到所有的filter和map的操作都是从这个subscribeOn我定义的这个schedule s上面去发起的
+
+假设情况如下, 定义了另外一个subscribeOn S2,在flux的定义的过程中又重新去覆盖了我这个subscribeOn, 并且是Scheduler S2, 会怎么样?
+
+```java
+public void simpleSubscribeOn() throws InterruptedException {
+    Scheduler s = Schedulers.newElastic("subscribeOn-demo-elastic");
+    Scheduler s2 = Schedulers.newElastic("subscribeOn222-demo-elastic");
+    Flux<Integer> flux = Flux.range(1, 4)
+        .filter(i -> {
+            log.info("filter in thread {}", Thread.currentThread().getName());
+            return i % 2 == 0;
+        })
+        .subscribeOn(s)
+        .map(i -> {
+            log.info("map in thread {}", Thread.currentThread().getName());
+            return i + 2;
+        });
+    Thread t = new Thread(() -> {
+        log.info("start current thread");
+        flux.subscribeOn(s2).subscribe(i -> log.info(String.valueOf(i)));
+        log.info("end current thread");
+    });
+    t.start();
+    t.join();
+}
+```
+
+```
+19:35:32.311 [Thread-1] INFO scheduler.StreamScheulderNewTest - start current thread
+19:35:32.320 [Thread-1] INFO scheduler.StreamScheulderNewTest - end current thread
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - map in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - 4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - map in thread subscribeOn-demo-elastic-4
+19:35:32.320 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - 6
+```
+
+其实真正起作用的这些filter和map, 依然是在我定义的Scheduler上面去进行的, 也就是说Scheduler s2是没有起作用的. 
+
+这个也是符合预期的, **因为对于整个的一个响应式流的操作链上面定义的subscribeOn, 如果出现多个的话, 它只会由第一个会生效, 后面的一些都会直接被忽略不计.** 
+
+### publishOn
+
+![img](img/reactive-study/publishOnForFlux.svg)
+
+Run onNext, onComplete and onError on a supplied [`Scheduler`](https://projectreactor.io/docs/core/release/api/reactor/core/scheduler/Scheduler.html) [`Worker`](https://projectreactor.io/docs/core/release/api/reactor/core/scheduler/Scheduler.Worker.html).
+
+This operator influences the threading context **where the rest of the operators in the chain below it will execute**, up to a new occurrence of `publishOn`.
+
+**Discard Support:** This operator discards elements it internally queued for backpressure upon cancellation or error triggered by a data signal.
+
+和subscribeOn类似也是直接定义到响应式流的链路上, **它的作用域是在它的下游操作**
+
+```java
+public void simplePublishOn1() throws InterruptedException {
+    Scheduler s = Schedulers.newElastic("publishOn-demo-elastic");
+    Flux<Integer> flux = Flux.range(1, 4)
+        .filter(i -> {
+            log.info("filter in thread {}", Thread.currentThread().getName());
+            return i % 2 == 0;
+        })
+        .publishOn(s)
+        .map(i -> {
+            log.info("map in thread {}", Thread.currentThread().getName());
+            return i + 2;
+        });
+    Thread t = new Thread(() -> {
+        log.info("start current thread");
+        flux.subscribe(i -> log.info(String.valueOf(i)));
+        log.info("end current thread");
+    });
+    t.start();
+    t.join();
+}
+```
+
+所以在这个例子中他的作用于就是这个map操作.
+
+<img src="img/reactive-study/image-20220710193825029.png" alt="image-20220710193825029" style="zoom:50%;" />
+
+具体的来说, 当他从上游接收到的元素之后, 它会在这个schedule定义的执行上下文当中的去调用下游的onNExt方法将元素进行传输, 并且所有publishOn后续的操作服务, 都会默认在这个线程上去执行
+
+```
+19:39:22.236 [Thread-1] INFO scheduler.StreamScheulderNewTest - start current thread
+19:39:22.256 [Thread-1] INFO scheduler.StreamScheulderNewTest - filter in thread Thread-1
+19:39:22.259 [Thread-1] INFO scheduler.StreamScheulderNewTest - filter in thread Thread-1
+19:39:22.259 [Thread-1] INFO scheduler.StreamScheulderNewTest - filter in thread Thread-1
+19:39:22.259 [Thread-1] INFO scheduler.StreamScheulderNewTest - filter in thread Thread-1
+19:39:22.259 [publishOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-2
+19:39:22.259 [Thread-1] INFO scheduler.StreamScheulderNewTest - end current thread
+19:39:22.259 [publishOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - 4
+19:39:22.259 [publishOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-2
+19:39:22.259 [publishOn-demo-elastic-2] INFO scheduler.StreamScheulderNewTest - 6
+```
+
+当我们发起订阅的时候, 其实是在这个匿名线程里面去执行的操作, 所以从source到之前的publishOn, 它其实都在这个匿名线上执行的. 那publishOn定义了之后, 他会从Scheduler定义的线程池当中取一个来作为执行线程. 所以这边的map方法publishOn-demo-elastic这个操作中执行
+
+如果指定多个publishOn, 给定另外一个Scheduler s2, 并且放在filter之前, 
+
+```java
+public void simplePublishOn() throws InterruptedException {
+    Scheduler s = Schedulers.newElastic("publishOn-demo-elastic");
+    Scheduler s2 = Schedulers.newElastic("p2-demo-elastic");
+    Flux<Integer> flux = Flux.range(1, 4)
+        .publishOn(s2)
+        .filter(i -> {
+            log.info("filter in thread {}", Thread.currentThread().getName());
+            return i % 2 == 0;
+        })
+        .publishOn(s)
+        .map(i -> {
+            log.info("map in thread {}", Thread.currentThread().getName());
+            return i + 2;
+        });
+    Thread t = new Thread(() -> {
+        log.info("start current thread");
+        flux.subscribe(i -> log.info(String.valueOf(i)));
+        log.info("end current thread");
+    });
+    t.start();
+    t.join();
+}
+```
+
+```
+19:48:49.932 [main] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+19:48:50.051 [Thread-1] INFO scheduler.StreamScheulderNewTest - start current thread
+19:48:50.072 [Thread-1] INFO scheduler.StreamScheulderNewTest - end current thread
+19:48:50.073 [p2-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread p2-demo-elastic-4
+19:48:50.074 [p2-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread p2-demo-elastic-4
+19:48:50.074 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-3
+19:48:50.074 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - 4
+19:48:50.074 [p2-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread p2-demo-elastic-4
+19:48:50.075 [p2-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread p2-demo-elastic-4
+19:48:50.075 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-3
+19:48:50.075 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - 6
+```
+
+所以看到publishOn(s2)的作用域应该是下面的filter到下一个publishOn之间, p2-demo-elastic
+
+下面的map操作是在publishOn(s)定义的作用于下操作, publishOn-demo-elastic
+
+可以看到这里和声明多个subscribeOn有区别
+
+---
+
+### publishOn和subscribeOn
+
+
+
+```java
+public void trickyCombination() throws InterruptedException {
+    Scheduler p1 = Schedulers.newElastic("publishOn-demo-elastic");
+    Scheduler s1 = Schedulers.newElastic("subscribeOn-demo-elastic");
+    Flux<Integer> flux = Flux.range(1, 4)
+        .subscribeOn(s1)
+        .filter(i -> {
+            log.info("filter in thread {}", Thread.currentThread().getName());
+            return i % 2 == 0;
+        })
+        .publishOn(p1)
+        .map(i -> {
+            log.info("map in thread {}", Thread.currentThread().getName());
+            return i + 2;
+        });
+    Thread t = new Thread(() -> {
+        flux.subscribe(i -> log.info(String.valueOf(i)));
+    });
+    t.start();
+    t.join();
+}
+```
+
+```
+19:51:48.918 [main] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+19:51:49.062 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:51:49.062 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:51:49.062 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:51:49.062 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-3
+19:51:49.062 [subscribeOn-demo-elastic-4] INFO scheduler.StreamScheulderNewTest - filter in thread subscribeOn-demo-elastic-4
+19:51:49.062 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - 4
+19:51:49.062 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - map in thread publishOn-demo-elastic-3
+19:51:49.062 [publishOn-demo-elastic-3] INFO scheduler.StreamScheulderNewTest - 6
+```
+
+publishOn, subscribeOn
+
+subscribeOn的作用域是从定义subscribe的动作, 也就是订阅操作开始. `flux.subscribe(i -> log.info(String.valueOf(i)));`
+
+subscribeOn作用域是从响应式流的源头(Flux.range)开始. 一直作用到出现了publishOn为止, 也就是上面的filter操作, 使用的是Scheduler s1
+
+当定义了publishOn, 之后的操作上下文就被scheduler p1接管, 也就是map操作
+
+# Flux的并发执行
 
 
 
@@ -1353,15 +1602,7 @@ reactor框架提供了两种方法来**改变执行的上线文**, 分别是subs
 
 ---
 
-, 下面呢我们来讲一下刚刚例子中我们用到的这个方法. 框架呢提供了两种方法来让我们改变执行的, 分别是subscribe和他们都会接受一个schedule的作为入参, 并且呢把执行的上下文切换到传入的schedule上. 那在这一小, 我们来结合例子判断出来和的区别, 首先呢我们来看一看, subscribe on它其实是作用在小process上的, 也就是在发起, 订阅的流程上, 那我们是什么时候会发起这个医院的？当我们去调用方法的时候, 我们就发起了这个订阅. 所以呢你不管把这个放在我们这个定义的定义的flux操作的哪一个位置对对在这个我们定义的一个比较简单的on的这个方法帮助, 我定义了一个流, 并且呢当他在定义的操作之后, 我指定了我要去通过这个s这个schedule. 来对他进行一个这样就相当于告诉啊我的程序, 当我在发起我这个订阅作的时候, 请你把这个执行上下文交给到我的这个s. 所以呢即使我的, 我的这个的动作是从我们的这个匿名的这个线程去发现. 那当我去跑这个程序的时候, 我依然是看到我所有的future和map的操作都是从这个我定义的这个schedule上面去发起的这个呢就是一个最简单的作用. 那我们这边稍微去覆盖一下一个比较极端的, 那好比说我这边小心我定义了另外一个, 我给他另外一个这个. 那么我不小心在我这个flux的定义的过, 我又重新去覆盖了我这个小蛋糕. 然后并且给进了他的s二这样的一个, 那么这个时候大家才会发生什么呀？我们来跑一下, 去看一下结果. 大家看到这边跑完之后呢, 其实真正起作用的这些filter和map的话, 依然是在我定义的上面去进行的, 也就是说我这个私家的s二是没有起作用的. 这个也是符合预期的, 因为呢对于整个的一个响应是流的操作链上面定义的, 如果出现多个的话, 它只会由第一个会生效, 后面的一些呢都会直接被忽略不计. 讲完了小孩下面呢我们来看一看, puppy跟on非常类似, 他也是直接定义在响应时流的链路上. 它的作用域呢是在它的下游操作, 所以在这个例子里面它的作用就是这个map操作. 具体的来说, 当他从上游接收到的元素之后, 它会在这个schedule的定义的执行上下文当中的去调用下游的方法将元素进行传输, 并且所有的后续的操作服务. 都会默认在这个线程上去执行, 我们来直接跑一下这个测试用例去看一下. 大家看到在这里呢, 当我们发起音乐的时候, 我们其实是在这个匿名县城里面去执行的操作, 所以大家看到我的从source到之前的这个, 它其实都在这个匿名县城上执行的. 那奥姆经历了之后呢, 根据我们之前的一个规范, 他会从定义的线程池当中取一个来作为执行线程. 所以这边的map方法呢, 我们看到这边的方法会从demo这个操作内容去执行. 那我们这边再来看一看另外一个极端情况, 我这边去指定了多个. 这边呢我给定另外一个加了, 那这个可能是一个提出加购的一个家去了, 并且我把它在了filter的前面. 我们再来跑一下, 看一下这个结果. 大家看到吧？那我这边第一个publish on s二呢, 他这个作用其实应该是在42~47行之间, 也就是这个filter操作. 所以我们看到在这个日志当, 我这个filter操作是在我p two杠1-, 也就是我这个s二的schedule当中去. 操作的也就是我的s二那, 那么对于下面一个map操作呢, 我们来看一下. 这边的卖操作它是由于我们建议的, 所以呢它是在s这个schedule的上面定义的线程去操作的. 这块儿跟我们去声明多个subscribe我们的情况呢稍微是有一是有一. 那最后呢我们来看一看, 我把结合在一起放在一个调用链路上去执行, 是什么样的一个结果？我直接去跑下. 现在看到啊, 其实我这个它的作用域是从定义我这个be的动作是你就是我的订阅操作开始. 然后呢他是从响应式流的这个源头就开始作用的. 一直作用到我出现了pap, 所以呢他真正起作用的是在65行到70行之间的这个操作, 那么看到在71行操作之前呢就是这个filter操作. 他其实是用了这个定义的这个感觉. 那么当我去在71行定义了这个之后呢, 这后面的操作的上下文就被p一这个schedule给接管了, 所以大家看到因为我的map的话, 它是在我的也就是我的p一的. 这个家具的上面去. 所以当大家以后要去分析和的作用域, 就可以用这种方法来进行推理. 
-
-
-
-
-
-
-
-# Flux的并发执行
+7-10
 
 课堂, 在这一小节呢, 我们来讲一下flux的并发, 执行的并发执行呢中的的里面是比较类似的. 都是为了充分利用当前计算机都的一个特性来把一些适合拆分的任务呢进行并发处理. 当, 这样的话, 他们使用他们所要考虑的问题也就会比较类似, 比如说一些资源的共享与竞争等等. 那怎么样去呃创造和执行一个的并？我们可以直接在这个上面去调用它的方法, 这样呢我们就得到了一个flux. 在这个拍照方法当中呢, 你也可以去自定义你需要的一个并发量. 但如果你没有给定的话, 他就会默认的去用这个default size, 那这个default呢其实就是你的CPU的这样的一个核心数. 大家在这边要注意啊, 如果我直接对这个parallel flux去进行一个操作的话, 比如说我在这边去进行一个那他还是直接就在我的主线程上去执行了, 也就是说他并没有去触发他的并发的执行的这样一个操作. 那要想让这个拍到真正的并发执行的, 你需要在这个parallel flux上面去调用它的run方法. 并且呢提供一个sched, 这边呃reactor框架是建议我们直接用用这个运用于并行计算的开料的这个建议, 好的这个私家了. 来进行呃任何的一个并发操作, 我们来跑一下, 看一下这里我们定义了run on之后呢, 我们就可以看到我们这边subscribe的人的时候. , 我的这个就真正的在不同的线程上得到了执行. 治理啊, 对于我们用定义的和我们自己写的一个实现类的处理方法呢也会有一些不同. 我们来看一下, 当我们使用来调度的时候呢, 就是我们刚刚跑的那个情况, 他会直接在每个并发的线程上执行这个拉姆达定义的消费操作, 也就是说他会执行在不同的线程上. 但是如果我们是通过这个自定义的这个来操作的, 我们来跑一下, 看一下结果. 啊, 我先把需要的一些内请给或者进来, 好, 那么我们来执行一下这个方法. 大家看到这边其实我的全部都是在同一个线程上, 也就是这个parallel one上面去完成. 比如说这边其实他并没有做一个并发, 那这是为什么呢？我们来看一下这个被不同方法签名重载的这个方法. 那对于我们提供了一个的时间内的时, 我们可以注意到他这个实现的方法当中有一个方法. 那就是这个sequential会把所有并发执行的r他合并成一个rear, 所以呢这里的打印就变成了同样一个现成了. 那我们知道这个sequential的意义呢就在于把这个parallel的这个flux转换成一个正常的一个flux, 那么这个呢也是通常经常会用到的一个做法就是好比说我这边使用flux进行了某些处理之后呢, 我需要把这个再转换成一个正常的flux去进行操作的时候, 我就可以用这个seal的这个方法. 我们来看一下这个例子, 那这边的话我对这个拍摄flux去进行一些操作, 并且呢我进行了一个来对它做了一个map, 那当我这个计算结束了之后呢, 我可以通过这个手把它再转换成一个正常的一个flux. 随后我就可以沿用我的flux和的这些响应式流的操作来对这些数据进行后续的一些处理. 那这个时候如果我尝试着去用这种定义的这个再去进行一个打印呢？我就会看到他们就会被打印在同一个线程上的, 并且呢这个线程排到三是这个. 
 

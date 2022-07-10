@@ -8,6 +8,30 @@ import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 public class StreamScheulderNewTest {
+
+    @Test
+    public void simpleSubscribeOn1() throws InterruptedException {
+        Scheduler s = Schedulers.newElastic("subscribeOn-demo-elastic");
+        Flux<Integer> flux = Flux.range(1, 4)
+            .filter(i -> {
+                log.info("filter in thread {}", Thread.currentThread().getName());
+                return i % 2 == 0;
+            })
+            .subscribeOn(s)
+            .map(i -> {
+                log.info("map in thread {}", Thread.currentThread().getName());
+                return i + 2;
+            });
+        Thread t = new Thread(() -> {
+            log.info("start current thread");
+            flux.subscribe(i -> log.info(String.valueOf(i)));
+            log.info("end current thread");
+        });
+        t.start();
+        t.join();
+    }
+
+
     //Two ways of changing execution context
     //  1. subscribeOn(scheduler)
     //  2. publishOn(scheduler)
@@ -33,6 +57,29 @@ public class StreamScheulderNewTest {
         t.start();
         t.join();
     }
+
+    @Test
+    public void simplePublishOn1() throws InterruptedException {
+        Scheduler s = Schedulers.newElastic("publishOn-demo-elastic");
+        Flux<Integer> flux = Flux.range(1, 4)
+            .filter(i -> {
+                log.info("filter in thread {}", Thread.currentThread().getName());
+                return i % 2 == 0;
+            })
+            .publishOn(s)
+            .map(i -> {
+                log.info("map in thread {}", Thread.currentThread().getName());
+                return i + 2;
+            });
+        Thread t = new Thread(() -> {
+            log.info("start current thread");
+            flux.subscribe(i -> log.info(String.valueOf(i)));
+            log.info("end current thread");
+        });
+        t.start();
+        t.join();
+    }
+
 
     @Test
     public void simplePublishOn() throws InterruptedException {
