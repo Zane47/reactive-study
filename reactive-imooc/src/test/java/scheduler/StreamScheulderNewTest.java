@@ -16,15 +16,15 @@ public class StreamScheulderNewTest {
         Scheduler s = Schedulers.newElastic("subscribeOn-demo-elastic");
         Scheduler s2 = Schedulers.newElastic("subscribeOn222-demo-elastic");
         Flux<Integer> flux = Flux.range(1, 4)
-                .filter(i -> {
-                    log.info("filter in thread {}", Thread.currentThread().getName());
-                    return i % 2 == 0;
-                })
-                .subscribeOn(s)
-                .map(i -> {
-                    log.info("map in thread {}", Thread.currentThread().getName());
-                    return i + 2;
-                });
+            .filter(i -> {
+                log.info("filter in thread {}", Thread.currentThread().getName());
+                return i % 2 == 0;
+            })
+            .subscribeOn(s)
+            .map(i -> {
+                log.info("map in thread {}", Thread.currentThread().getName());
+                return i + 2;
+            });
         Thread t = new Thread(() -> {
             log.info("start current thread");
             flux.subscribeOn(s2).subscribe(i -> log.info(String.valueOf(i)));
@@ -39,16 +39,16 @@ public class StreamScheulderNewTest {
         Scheduler s = Schedulers.newElastic("publishOn-demo-elastic");
         Scheduler s2 = Schedulers.newElastic("p2-demo-elastic");
         Flux<Integer> flux = Flux.range(1, 4)
-                .publishOn(s2)
-                .filter(i -> {
-                    log.info("filter in thread {}", Thread.currentThread().getName());
-                    return i % 2 == 0;
-                })
-                .publishOn(s)
-                .map(i -> {
-                    log.info("map in thread {}", Thread.currentThread().getName());
-                    return i + 2;
-                });
+            .publishOn(s2)
+            .filter(i -> {
+                log.info("filter in thread {}", Thread.currentThread().getName());
+                return i % 2 == 0;
+            })
+            .publishOn(s)
+            .map(i -> {
+                log.info("map in thread {}", Thread.currentThread().getName());
+                return i + 2;
+            });
         Thread t = new Thread(() -> {
             log.info("start current thread");
             flux.subscribe(i -> log.info(String.valueOf(i)));
@@ -63,16 +63,16 @@ public class StreamScheulderNewTest {
         Scheduler p1 = Schedulers.newElastic("publishOn-demo-elastic");
         Scheduler s1 = Schedulers.newElastic("subscribeOn-demo-elastic");
         Flux<Integer> flux = Flux.range(1, 4)
-                .subscribeOn(s1)
-                .filter(i -> {
-                    log.info("filter in thread {}", Thread.currentThread().getName());
-                    return i % 2 == 0;
-                })
-                .publishOn(p1)
-                .map(i -> {
-                    log.info("map in thread {}", Thread.currentThread().getName());
-                    return i + 2;
-                });
+            .subscribeOn(s1)
+            .filter(i -> {
+                log.info("filter in thread {}", Thread.currentThread().getName());
+                return i % 2 == 0;
+            })
+            .publishOn(p1)
+            .map(i -> {
+                log.info("map in thread {}", Thread.currentThread().getName());
+                return i + 2;
+            });
         Thread t = new Thread(() -> {
             flux.subscribe(i -> log.info(String.valueOf(i)));
         });
