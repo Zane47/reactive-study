@@ -1594,6 +1594,224 @@ subscribeOn作用域是从响应式流的源头(Flux.range)开始. 一直作用�
 
 # Flux的并发执行
 
+类似jdk8中的parallelStream, 充分利用当前计算机多核的特性, 来把一些适合拆分的任务进行并发处理
+
+这样的话, 使用他们所要考虑的问题也就会比较类似, 比如说一些资源的共享与竞争等等.
+
+flux.parallel()
+
+<img src="img/reactive-study/parallel.svg" alt="img" style="zoom:80%;" />
+
+Prepare this [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) by dividing data on a number of 'rails' matching the number of CPU cores, in a round-robin fashion. Note that to actually perform the work in parallel, you should call [`ParallelFlux.runOn(Scheduler)`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/ParallelFlux.html#runOn-reactor.core.scheduler.Scheduler-) afterward.
+
+可以自定义并发量
+
+```java
+public final ParallelFlux<T> parallel() {
+    return parallel(Schedulers.DEFAULT_POOL_SIZE);
+}
+public static final int DEFAULT_POOL_SIZE =
+    Optional.ofNullable(System.getProperty("reactor.schedulers.defaultPoolSize"))
+    .map(Integer::parseInt)
+    .orElseGet(() -> Runtime.getRuntime().availableProcessors());
+```
+
+## 错误的调用方式
+
+需要注意的是, 如果直接操作flux.parallel(), 还是都在主线程上做执行.
+
+```java
+public void parallelFlux1() {
+    Flux<Integer> flux = Flux.range(1, 20);
+    ParallelFlux<Integer> paralleled = flux.parallel();
+    paralleled.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+}
+```
+
+```
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 1 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 2 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 3 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 4 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 5 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 6 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 7 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 8 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 9 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 10 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 11 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 12 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 13 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 14 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 15 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 16 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 17 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 18 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 19 on main
+20:19:02.956 [main] INFO StreamParallelFluxTest - print 20 on main
+```
+
+## 正确的调用方式
+
+想要真正的并发执行, 需要调用`flux.parallel().runOn(Schedulers.parallel())`方法, 可以看到是真正的在不同线程上执行
+
+```java
+public void parallelFlux2() {
+    Flux<Integer> flux = Flux.range(1, 20);
+    ParallelFlux<Integer> paralleled = flux.parallel().runOn(Schedulers.parallel());
+    paralleled.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+}
+```
+
+运行结果
+
+```
+20:20:43.984 [parallel-4] INFO StreamParallelFluxTest - print 4 on parallel-4
+20:20:43.983 [parallel-1] INFO StreamParallelFluxTest - print 1 on parallel-1
+20:20:43.984 [parallel-2] INFO StreamParallelFluxTest - print 2 on parallel-2
+20:20:43.984 [parallel-3] INFO StreamParallelFluxTest - print 3 on parallel-3
+20:20:43.985 [parallel-3] INFO StreamParallelFluxTest - print 7 on parallel-3
+20:20:43.985 [parallel-3] INFO StreamParallelFluxTest - print 11 on parallel-3
+20:20:43.985 [parallel-3] INFO StreamParallelFluxTest - print 15 on parallel-3
+20:20:43.985 [parallel-3] INFO StreamParallelFluxTest - print 19 on parallel-3
+20:20:43.985 [parallel-1] INFO StreamParallelFluxTest - print 5 on parallel-1
+20:20:43.985 [parallel-2] INFO StreamParallelFluxTest - print 6 on parallel-2
+20:20:43.985 [parallel-4] INFO StreamParallelFluxTest - print 8 on parallel-4
+20:20:43.985 [parallel-2] INFO StreamParallelFluxTest - print 10 on parallel-2
+20:20:43.985 [parallel-2] INFO StreamParallelFluxTest - print 14 on parallel-2
+20:20:43.985 [parallel-2] INFO StreamParallelFluxTest - print 18 on parallel-2
+20:20:43.985 [parallel-1] INFO StreamParallelFluxTest - print 9 on parallel-1
+20:20:43.985 [parallel-4] INFO StreamParallelFluxTest - print 12 on parallel-4
+20:20:43.986 [parallel-4] INFO StreamParallelFluxTest - print 16 on parallel-4
+20:20:43.986 [parallel-1] INFO StreamParallelFluxTest - print 13 on parallel-1
+20:20:43.986 [parallel-4] INFO StreamParallelFluxTest - print 20 on parallel-4
+20:20:43.986 [parallel-1] INFO StreamParallelFluxTest - print 17 on parallel-1
+```
+
+## lambda和new Subscriber的区别
+
+lambda定义的subscriber和自己写的subscriber实现类的区别
+
+lambda来调度的时候, 直接在每个并发的线程上执行这个lambda定义的消费操作, 也就是说会执行在不同的线程上
+
+new Subscriber操作的时候, 
+
+```java
+public void parallelFlux() {
+    Flux<Integer> flux = Flux.range(1, 20);
+    ParallelFlux<Integer> paralleled = flux.parallel().runOn(Schedulers.parallel());
+    //        paralleled.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+    paralleled.subscribe(new Subscriber<Integer>() {
+        @Override
+        public void onSubscribe(Subscription s) {
+            s.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(Integer integer) {
+            log.info("print {} on {}", integer, Thread.currentThread().getName());
+        }
+
+        @Override
+        public void onError(Throwable t) {
+
+        }
+
+        @Override
+        public void onComplete() {
+
+        }
+    });
+}
+```
+
+```
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 3 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 1 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 2 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 4 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 5 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 6 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 8 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 9 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 10 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 12 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 13 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 14 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 16 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 17 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 18 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 20 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 7 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 11 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 15 on parallel-3
+20:23:29.607 [parallel-3] INFO StreamParallelFluxTest - print 19 on parallel-3
+```
+
+print都是在同一个线程上, 并没有并发.
+
+```java
+public final void subscribe(Subscriber<? super T> s) {
+    FluxHide.SuppressFuseableSubscriber<T> subscriber =
+        new FluxHide.SuppressFuseableSubscriber<>(Operators.toCoreSubscriber(s));
+
+    Operators.onLastAssembly(sequential()).subscribe(Operators.toCoreSubscriber(subscriber));
+}
+```
+
+主要就是这里的`sequential()`会把所有并发执行parallelflux的合并成一个正常的flux, 所以这里变成了一个
+
+这要是经常会用到的做法, 一般用在把义哥parallelFlux做操作之后转换成正常的Flux, 例如下面的
+
+```java
+public void afterParallelFlux() {
+    Flux<Integer> flux = Flux.range(1, 20);
+    ParallelFlux<Integer> paralleled = flux.parallel();
+    Flux<Integer> normalized = paralleled
+        .runOn(Schedulers.parallel())
+        .map(i -> i + 1)
+        .sequential();
+    normalized.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+}
+```
+
+```
+20:26:14.451 [parallel-1] INFO StreamParallelFluxTest - print 2 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 3 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 4 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 5 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 7 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 8 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 9 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 11 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 12 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 13 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 15 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 16 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 17 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 19 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 20 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 21 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 6 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 10 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 14 on parallel-1
+20:26:14.467 [parallel-1] INFO StreamParallelFluxTest - print 18 on parallel-1
+```
+
+这里的`parallel-1`是由来`Schedulers.parallel()`提供
+
+# 处理实时流
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1602,11 +1820,7 @@ subscribeOn作用域是从响应式流的源头(Flux.range)开始. 一直作用�
 
 ---
 
-7-10
-
-课堂, 在这一小节呢, 我们来讲一下flux的并发, 执行的并发执行呢中的的里面是比较类似的. 都是为了充分利用当前计算机都的一个特性来把一些适合拆分的任务呢进行并发处理. 当, 这样的话, 他们使用他们所要考虑的问题也就会比较类似, 比如说一些资源的共享与竞争等等. 那怎么样去呃创造和执行一个的并？我们可以直接在这个上面去调用它的方法, 这样呢我们就得到了一个flux. 在这个拍照方法当中呢, 你也可以去自定义你需要的一个并发量. 但如果你没有给定的话, 他就会默认的去用这个default size, 那这个default呢其实就是你的CPU的这样的一个核心数. 大家在这边要注意啊, 如果我直接对这个parallel flux去进行一个操作的话, 比如说我在这边去进行一个那他还是直接就在我的主线程上去执行了, 也就是说他并没有去触发他的并发的执行的这样一个操作. 那要想让这个拍到真正的并发执行的, 你需要在这个parallel flux上面去调用它的run方法. 并且呢提供一个sched, 这边呃reactor框架是建议我们直接用用这个运用于并行计算的开料的这个建议, 好的这个私家了. 来进行呃任何的一个并发操作, 我们来跑一下, 看一下这里我们定义了run on之后呢, 我们就可以看到我们这边subscribe的人的时候. , 我的这个就真正的在不同的线程上得到了执行. 治理啊, 对于我们用定义的和我们自己写的一个实现类的处理方法呢也会有一些不同. 我们来看一下, 当我们使用来调度的时候呢, 就是我们刚刚跑的那个情况, 他会直接在每个并发的线程上执行这个拉姆达定义的消费操作, 也就是说他会执行在不同的线程上. 但是如果我们是通过这个自定义的这个来操作的, 我们来跑一下, 看一下结果. 啊, 我先把需要的一些内请给或者进来, 好, 那么我们来执行一下这个方法. 大家看到这边其实我的全部都是在同一个线程上, 也就是这个parallel one上面去完成. 比如说这边其实他并没有做一个并发, 那这是为什么呢？我们来看一下这个被不同方法签名重载的这个方法. 那对于我们提供了一个的时间内的时, 我们可以注意到他这个实现的方法当中有一个方法. 那就是这个sequential会把所有并发执行的r他合并成一个rear, 所以呢这里的打印就变成了同样一个现成了. 那我们知道这个sequential的意义呢就在于把这个parallel的这个flux转换成一个正常的一个flux, 那么这个呢也是通常经常会用到的一个做法就是好比说我这边使用flux进行了某些处理之后呢, 我需要把这个再转换成一个正常的flux去进行操作的时候, 我就可以用这个seal的这个方法. 我们来看一下这个例子, 那这边的话我对这个拍摄flux去进行一些操作, 并且呢我进行了一个来对它做了一个map, 那当我这个计算结束了之后呢, 我可以通过这个手把它再转换成一个正常的一个flux. 随后我就可以沿用我的flux和的这些响应式流的操作来对这些数据进行后续的一些处理. 那这个时候如果我尝试着去用这种定义的这个再去进行一个打印呢？我就会看到他们就会被打印在同一个线程上的, 并且呢这个线程排到三是这个. 
-
-# 处理实时流
+7-11
 
 大家好, 欢迎回到今天的课堂, 在这一小节呢, 我们要来讲解对于reactor的框架当中实时流的处理, 到目前为止啊, 我们例子中所讲到的所有响应式流都代表, 了一个数据的序列并且在我们订阅到这个发布者之前呢, 他是不会改变的, 但实际上发布者也分为两大类, 实时的和非实施. 我们之前的描述就符合了非实时流的这样的一个特征, 那在这个类里呢, 发布者只有在订阅者的时候才会生成数据向下游传播. 如果没有订阅的话就没有数据生成了, 那实时流呢他就正好相反. 他并不依赖于有多少个订阅者, 他们可能从创建之初开始就开始向外发送数据了. 并且在当有新的订阅者订阅的时候会个发送的过程, 那这个数据的序列呢可以是无限长的. 从订阅者的角度来讲, 他就只能看到他开始订阅之后的实时数据了, 那他订阅之前的那一些历史数据呢对他是必不可见的, 这个实时留的一个例子就是当前市场的一个股价. 这个股价不管有多少订阅者都是近期向外传播的, 你可以在一天中的任何一个时间来订阅这个股票价格的数据源, 并且呢从订阅生效开始. 那一客气得到一个实时的数据, 那我们要怎么样去创建一个实时流呢？那rex框架给了我们一个sink类, 能够通过代码来构建一个实时流. 我们来看一下, 首先呢我们建议一个many的这样一个呃一个sink类它的这边我们建议的一个泛型实习记者, 然后这边我们把它定义成一个hot代表, 它是一个实时流. 这边我们就用他给进了一些静态方法来代表这边一个multi cast. 然后呢？并且它是一个软的一个呃发送的一个数据源. 然后我们对于这个since so many的类呢会用一个转换的方法来对它进行一个转换. 直接去调用的方法来把它转换成一个我们熟悉的一个类型的一个流. 那下一步呢？我们去定义一个. 敬业者, 这个意面者就是在我们这个旅游真正发送数据之前就已经开始了进行一个数据的订阅. 那这边的话, 我去. 像我们订阅的每一个数据. 进行一个打印出来. 我只是先简单去打印, 然后呢我们可以直接去调用这个号上面的一些方法. 比如说mx就是代表说我要想去发送一个事件. 那这边呢我给你的元素是一, 并且我是feel fast. 就代表他会如果发送失败的话就直接退出. 或者你也可以去通过一些另外的方法, 比如说我也可以用. 就这样一个操作. 那这样的话, 我就可以说在这里面去抛出一些异常. 就这样, 那接下来呢我们在这个发送的两个数据之后再去添加一个订阅的, 这就是我们第二个订阅者. 他同样的对于第二个订阅者, 我也去呃简单的对这个订阅之后的数据进行一个打印. 那在此之后呢, 我会继续去发送. 第三个和第四个就是, 分别是三和四. 最后我就用方法来结束整个音乐过程好, 我们来跑一下, 看一下结果. 看到跑下来的结12三次, 那么对于二呢, 因为它是在发送的前两个元素之后才加入的订阅. 所以那对于这个来说的话, 他只会干到三和四. 这里呢我们就看到元素的生成和有没有被订阅是完全独立的两个事件. 这个呢就是一个简单的实时流的一个实现过程, 那我们要怎么样去创建一个实时流呢？excExcel框架给了我们一个sink类, 能够通过代码来构建这样的一个实时流, 我们来看一下这个代码的示例哈. 首先呢我们需要去定义一个类的这, 这边的话, 那其实对应的就是一个多元素的一个数据, 相当于我们的一个x. 然后呢然后我去听法的好代表是一个诗人, 然后这个创建的话, 我们直接去调用things里面它的一些内部的构建方法就可以了. 把这个转换成一个可以被操作的一个flux这样的一个响应式流的一个接口. 直接教育他的方法, 那在我定义好了这个之后呢, 我去给这个flux这个添加一个来调用它的. 方法, 那在这里的话, 我只需把它给打印出来就可以了. 一定是扫车一那在定义完这个订阅者之后呢, 我们就用上面的方法. 来发送几个元素. 这里呢我定义它的handler是fell fast, 也就是快速的失败. 这边我创建两个颜色, 呃, 发送两个颜色之后呢, 我们再向这个flux上面去添加一个. 这个就是啊. 在我们建议完这个二之后呢, 我们再去多发送两个元素, 三和四. 整个发送结束之后去调用的方法来结束这个. 整个发送流程好, 那这个就是这样一个过程, 我们来跑一下, 看一下, 结果大家看到. 我们跑完这个代码之后啊, 啊, 我们这个旅游一共呃发送了四个元素. 那我对于我的一来说的话, 我是在发送第一个元素之前就已经订阅了, 所以呢他拿到了所有的四个元素. 123和四, 那么对于我第二个扫, 由于我是在发送的中途来去添加的这个订阅, 那么他只拿到了后面发送了三根四质两个元素. 所以在这个情, 大家看到这里的元素的发送和有没有被订阅是完全独立的两个事件. 此外呢, 在一些其他的场景当中, 你可能需要去协调多个订阅者的操作, 比如说你想首先让多发起这个订阅, 然后再去触发真正的消息去发送, 那这个时候呢你就需要用到这样一个这样一个类, 那它是怎么工作呢？我们来看一看. 首先我有一个正常的一个发的这样一个流. 啊, 名称叫然后他我就直接给他定义成range的1~4. 那这个时候呢, 我可以去构造一个connect flux. 就可能的方法其实就是在上面去调用方, 把它变成一个flux. 好, 那下面呢我直接再去对这个上面去定义. 两个订阅者, 首先第一个是跟之前一样, 我们去把它简单的去做一个打印的订阅操作. 这边的话, 我听你的两个听音乐者. 然后呢我去打印一下日志, 去告诉这个信息. 我这边已经结束了我订阅, 但这个时候啊大家看到其实它并不会被触发, 所以我这边去给大家验证一下, 这边呢我暂停个三秒吧. 然后我去. 告诉他, 我马上要去开始我的那个操作. 时候, 最后呢我再去真正的去调用flux flux方法. 来触发这个订阅. 这样的, 当我去教育考那个之后, 这个就会开始向下游去进行这个颜色的一个错误. 我们来跑一下代码, 看一下结果我们来看到这边的话的确是符合了我们的预期, 也就是说当我们去定义这个的时候, 他并没有真正的去触发这个向下游发送的这个呃元素传播的这个操作. 而是当我们连接到这个flux之后, 也就是调用了耐克的方法. 随后呢我们的才真正拿到了数据, 所以呢就靠在就实现了我们之前说的让多个定位者先发起订阅, 再去处罚真正的消息发送操作的这样一个目的. 并且呢这个类似于一个broadcast, 一个广播机制. 我真正的数据语言. 笑死了, 他只生成了一份文件, 就是1234. 但是我的者一跟二他们同时都消费到了这个数据, 这个呢就类似于一个广播的. 一个央视同时呢也有一个auto自动连接的一个机制, 也就是说当我连接到这个flux的订阅者的数量达到了一定值的时候, 它就会自动的去开始这个连接, 这样的话大家都可以拿到数据. 那怎么去？那在这里的话, 我们直接去添加一个这样的一个操作. 当我第一个订阅者操作完成之后, 后面的我们显示的去调用这个考耐就其实已经不需要了. 我来跑一下, 看一下结果. 那大家在这里我其实已经没有去调用这个卡耐方法了, 那当我第二个呃, 方法呃去经历了第二个订阅者之后呢, 那就自动触发的这个这个时候马上开始了数据的传播, 然后我的发票本儿102都拿到了1234这样的一个颜色的副本. 
 

@@ -8,6 +8,23 @@ import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 public class StreamParallelFluxTest {
+
+
+    @Test
+    public void parallelFlux1() {
+        Flux<Integer> flux = Flux.range(1, 20);
+        ParallelFlux<Integer> paralleled = flux.parallel();
+        paralleled.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+    }
+
+    @Test
+    public void parallelFlux2() {
+        Flux<Integer> flux = Flux.range(1, 20);
+        ParallelFlux<Integer> paralleled = flux.parallel().runOn(Schedulers.parallel());
+        paralleled.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
+    }
+
+
     @Test
     public void parallelFlux() {
         Flux<Integer> flux = Flux.range(1, 20);
@@ -41,9 +58,9 @@ public class StreamParallelFluxTest {
         Flux<Integer> flux = Flux.range(1, 20);
         ParallelFlux<Integer> paralleled = flux.parallel();
         Flux<Integer> normalized = paralleled
-                .runOn(Schedulers.parallel())
-                .map(i -> i + 1)
-                .sequential();
+            .runOn(Schedulers.parallel())
+            .map(i -> i + 1)
+            .sequential();
         normalized.subscribe(i -> log.info("print {} on {}", i, Thread.currentThread().getName()));
     }
 }
