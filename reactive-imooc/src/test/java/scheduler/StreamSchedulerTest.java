@@ -9,8 +9,8 @@ public class StreamSchedulerTest {
     public void noThreadDefined() {
         Mono<String> mono = Mono.just("foo");
         mono
-                .map(str -> str + " with no thread defined ")
-                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+            .map(str -> str + " with no thread defined ")
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
     }
 
     @Test
@@ -18,8 +18,8 @@ public class StreamSchedulerTest {
         Thread t = new Thread(() -> {
             Mono<String> mono = Mono.just("foo");
             mono
-                    .map(str -> str + " with no thread defined ")
-                    .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+                .map(str -> str + " with no thread defined ")
+                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
         });
         t.start();
         t.join();
@@ -29,28 +29,28 @@ public class StreamSchedulerTest {
     public void schedulerImmediate() {
         Mono<String> mono = Mono.just("foo");
         mono
-                .map(str -> str + " with scheduler defined ")
-                .subscribeOn(Schedulers.immediate())
-                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+            .map(str -> str + " with scheduler defined ")
+            .subscribeOn(Schedulers.immediate())
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
     }
 
     @Test
     public void schedulerSingle() {
         Mono<String> mono = Mono.just("foo");
         mono
-                .map(str -> str + " with scheduler defined ")
-                .subscribeOn(Schedulers.single())
-                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+            .map(str -> str + " with scheduler defined ")
+            .subscribeOn(Schedulers.single())
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
     }
 
     @Test
     public void schedulerElastic() {
         Mono<String> mono = Mono.just("foo");
         mono
-                .map(str -> str + " with scheduler defined ")
-//                .subscribeOn(Schedulers.elastic())
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+            .map(str -> str + " with scheduler defined ")
+//            .subscribeOn(Schedulers.elastic())
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
 
         //if I need to wrap a blocking call
         Mono<String> fromBlockingCall = Mono.fromCallable(() -> {
@@ -61,12 +61,12 @@ public class StreamSchedulerTest {
     }
 
     @Test
-    public void schedulerParallel(){
+    public void schedulerParallel() {
         Mono<String> mono = Mono.just("foo");
         mono
-                .map(str -> str + " with scheduler defined ")
-                .subscribeOn(Schedulers.parallel())
-                .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+            .map(str -> str + " with scheduler defined ")
+            .subscribeOn(Schedulers.parallel())
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
     }
 
 }

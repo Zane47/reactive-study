@@ -1175,13 +1175,185 @@ Ok, 那么下面一种情况呢？这个相, 它又多了一个叫substitution c
 
 ## Scheduler的使用
 
-讲完了响应是留的一些操作, 下面呢我们来讲一讲reactor框架中的线程和schedule的, 也就是调度器呢, 它并没有强制我们去使用某一个并发模型. 所以呢作为程序员是可以自由的去选择执行model和flux的操作现场的. 并且摸到和flux的不同操作是可以分别在不同的现场上去完, 这里呢我们来分几种不同的情况一起来看一下. 首先呢, 我们直接在测试线程中定义一个moo去跑. 那我们在这个地方的方法当中进行了一个moo, 并且做一个简单的一个map. 在的方法当中, 我们定义这个consumer啊, 来去打印出当前执行的这个线程的名称, 好, 那我这边去跑一下, 看一下结果. 我们可以看到这边其实执行的现成的它的名称叫妹, 也就是我们去跑这个测试方法的一个主线程. 那么第二个方法呢, 我还是跟之前一模一样的一个呃对于mono的这个详细流的操作, 只不过我定义了一个新的线程t, 并且我在这个匿名县城当中的去呃出发了一个线程去做的这个呃对于这个响应式的操作. , 看一下这边可以呃给我的这个现成的名称是什么？大家可以看到这边其实爆出来的现成的名称呢, 就是我们给定的这个呃他所跑在的这个匿名现场上面的. 他的名称就是杠一, 那么以上两种呢就是默认在不指定任何线程的情况下. 他会去subscribe的当前的触发线程来作为调用整个响应式流从头到尾操作的线程. 如果我们要对响应时流的操作执行模式做任何定制化的, 就必须要用到它定义的schedule调度器了. 他跟c中的xq service差不多. 都承担了一个较度的任务, 但是他的功能会更强大一点, 我们以为例来先讲一下这几种调用schedule的方法. 首先第一个呢是schedule到immediately, 在这个情况下, 他相当于就没有指定任何线程执行的上下文. 他直接会使用当前啊的线程来执行我们的. 操作所以这边看到这边的情况跟我们的第一种方法非常类似, 就直接在当前的主线程上去调用的这个方法. 第二种呢schedule到single. 当你指定schedule到single作为你on the schedule的时候呢？他就会在一个可以被复用的线程上来执行我们的p操作. 这个时候啊, 我们来跑一下. 大家看到这边教育的结果呢, 显示的是说我们这边真正的去执行这个的现场是叫single杠一, 这也是schedule到single, 他给定的这个现场. 下面一个呢是elastic, 这个elastic莫名思义就是弹性的意思. 他会将多个subscribe操作呢都放在一个弹性的线程池里面进行, 这个线程池可以无限的增长, 当然了这样的话就容易造成产生了过多的现成的一个情况, 所以不建议在比较高流量的生产环境去使用. 他稍微更保险的111个呢是这个邦德的伊拉克的方法. 大家来看一下这个方的的一些定义啊, 在他的这个当中的定义呢. 他给定了一个, 首先第一个是帮在这个就是他工作的现成的数量. 这边他话是给呃是十乘以呃当前的可用的CPU核心的数量. 咋了？你也可以通过这个react到到default on the size来对这个系统的属性进行呃进行设置. 第二个属性呢就是这个default size, 这个顾名思一样, 它就定义了操作的等待队列的长度, 那这里面最多是默认情况下可以有10万个呃任务处在呃在处理的队列当中. 同时呢这个就代表这个线程池是一个弹性的, 如果他空闲了超过60秒的话, 这个线程就会被回收, 大家看这边的有很多配置都可以通过property去指定的, 呃, 如果有需要的话呢, 可以去看一下文档来进行一些配置这个帮的elastic呢, 他很适合被拿来做一些阻塞的进程的调用, 比如说你的但如果是一个的调研的话, 当你需要把它融合进你的响应式编程的时候呢？你可以直接向下面这样去调用它, 首先你先用一个把它包装成一个. 并且呢你通过调用来定义说这个model的调用需要放在我的帮助里面. 去执行, 这样的话呢, 我就能够保证我的全部都是从这个帮的的这个线程池当中去进行执行. 那最后呢还有一个schedule, 那这个拍照的话, 它一般是拿来做一些并行计算球才会用到, 那我们在这个model里面的就不去做过多的展开了. 
+reactor框架中的线程和schedule的调度器
+
+Reactor并没有强制我们去使用某一个并发模型. 所以可以自由的去选择执行Mono和flux的操作现成的. 并且Mono和Flux的不同操作是可以分别在不同的线程上去完成
+
+### 未定义线程
+
+```java
+public void noThreadDefined() {
+    Mono<String> mono = Mono.just("foo");
+    mono
+        .map(str -> str + " with no thread defined ")
+        .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+}
+```
+
+结果
+
+```
+foo with no thread defined main
+```
+
+### newThread
+
+定义了一个新的线程t
+
+```java
+public void runInNewThread() throws InterruptedException {
+    Thread t = new Thread(() -> {
+        Mono<String> mono = Mono.just("foo");
+        mono
+            .map(str -> str + " with no thread defined ")
+            .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+    });
+    t.start();
+    t.join();
+}
+```
+
+结果
+
+```
+foo with no thread defined Thread-1
+```
+
+他打印的名称, 就是我们给定的所跑在的这个匿名Thread上面的. 他的名称就是Thread-1
+
+---
+
+以上两种呢就是**默认在不指定任何线程**的情况下. 他会去subscribe的当前的触发线程来作为调用整个响应式流从头到尾操作的线程
+
+如果我们要对响应时流的操作执行模式做任何定制化的, 就必须要用到它定义的schedule调度器了. 和JUC中的ExecutorService差不多,  都承担了调度任务, 但是功能更强大
+
+### Schedulers.immediate
+
+```java
+public void schedulerImmediate() {
+    Mono<String> mono = Mono.just("foo");
+    mono
+        .map(str -> str + " with scheduler defined ")
+        .subscribeOn(Schedulers.immediate())
+        .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+}
+```
+
+```
+foo with scheduler defined main
+```
+
+相当于就没有指定任何线程执行的上下文. 直接会使用当前的线程来执行我们的subscribe操作
+
+和之前的1很类似, 直接在当前的主线程上去调用的这个方法
+
+### Schedulers.single
+
+```java
+public void schedulerSingle() {
+    Mono<String> mono = Mono.just("foo");
+    mono
+        .map(str -> str + " with scheduler defined ")
+        .subscribeOn(Schedulers.single())
+        .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+}
+```
+
+```
+foo with scheduler defined single-1
+```
+
+当指定schedule.single作为subscribeOn的scheduler的时候, 会在一个可以被复用的线程上来执行我们的subscribe操作.
+
+### Schedulers.elastic
+
+```java
+public void schedulerElastic() {
+    Mono<String> mono = Mono.just("foo");
+    mono
+        .map(str -> str + " with scheduler defined ")
+        // .subscribeOn(Schedulers.elastic())
+        .subscribeOn(Schedulers.boundedElastic())
+        .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+
+    //if I need to wrap a blocking call
+    Mono<String> fromBlockingCall = Mono.fromCallable(() -> {
+        /**a blocking call to downstream**/
+        return "result";
+    });
+    Mono<String> wrappedBlockingCall = fromBlockingCall.subscribeOn(Schedulers.boundedElastic());
+}
+```
+
+elastic, 弹性. 将多个subscribe操作都放在一个弹性的线程池里面进行, 这个线程池可以无限的增长, 不建议在比较高流量的生产环境去使用
+
+更保险的是Schedulers.boundedElastic
+
+```java
+static final Supplier<Scheduler> BOUNDED_ELASTIC_SUPPLIER =
+    () -> newBoundedElastic(DEFAULT_BOUNDED_ELASTIC_SIZE, DEFAULT_BOUNDED_ELASTIC_QUEUESIZE,
+                            BOUNDED_ELASTIC, BoundedElasticScheduler.DEFAULT_TTL_SECONDS, true);
+```
+
+```java
+public static Scheduler newBoundedElastic(int threadCap, int queuedTaskCap, String name, int ttlSeconds, boolean daemon) {
+    return newBoundedElastic(threadCap, queuedTaskCap,
+                             new ReactorThreadFactory(name, ElasticScheduler.COUNTER, daemon, false,
+                                                      Schedulers::defaultUncaughtException),
+                             ttlSeconds);
+}
+```
+
+BOUNDED_ELASTIC_SIZE: 工作的线程的数量. 默认是10乘以当前的可用的CPU核心的数量
+
+BOUNDED_ELASTIC_QUEUESIZE: 定义了操作的等待队列的长度, 最多默认情况下可以有10万个任务处在在处理的队列当中, 同时DEFAULT_TTL_SECONDS代表线程池是弹性的, 如果空闲超过60s就会被回收
+
+这些配置都可以通过systemproperties来指定
+
+boundedElastic很适合被拿来做一些阻塞的进程的调用, 比如说数据源是blocking调用, 当你需要把它融合进你的响应式编程的时候, 可以这样子
+
+```java
+//if I need to wrap a blocking call
+Mono<String> fromBlockingCall = Mono.fromCallable(() -> {
+    /**a blocking call to downstream**/
+    return "result";
+});
+Mono<String> wrappedBlockingCall = fromBlockingCall.subscribeOn(Schedulers.boundedElastic());
+```
+
+首先用fromBlockingCall包装成Mono, 并且通过调用subscribeOn来定义说这个model的调用需要放在我的boundedElastic中执行, 这样就能够保证我的BlockingCall全部都是从boundedElastic这个线程池当中去进行执行
+
+### Schedulers.parallel
+
+```java
+public void schedulerParallel() {
+    Mono<String> mono = Mono.just("foo");
+    mono
+        .map(str -> str + " with scheduler defined ")
+        .subscribeOn(Schedulers.parallel())
+        .subscribe(str -> System.out.println(str + Thread.currentThread().getName()));
+}
+```
+
+一般是拿来做一些并行计算才会用到
+
+讲完了关于响应式流的执行线程的配置, 也就是通过定义不同的schedule, 其中使用了subscriberOn, 下一节来看一下是什么
+
+## publisherOn和subscriberOn
+
+reactor框架提供了两种方法来**改变执行的上线文**, 分别是subscriberOn(schedule)和publisherOn(schedule). 
+
+他们都会接受一个schedule的作为入参, 并且把执行的上下文切换到传入的schedule上
 
 
 
-## publisherOn和subscriberOn的区别
 
-讲完了关于响应式流的执行线程的配置, 也就是通过定义不同的schedule, 下面呢我们来讲一下刚刚例子中我们用到的这个方法. 框架呢提供了两种方法来让我们改变执行的, 分别是subscribe和他们都会接受一个schedule的作为入参, 并且呢把执行的上下文切换到传入的schedule上. 那在这一小, 我们来结合例子判断出来和的区别, 首先呢我们来看一看, subscribe on它其实是作用在小process上的, 也就是在发起, 订阅的流程上, 那我们是什么时候会发起这个医院的？当我们去调用方法的时候, 我们就发起了这个订阅. 所以呢你不管把这个放在我们这个定义的定义的flux操作的哪一个位置对对在这个我们定义的一个比较简单的on的这个方法帮助, 我定义了一个流, 并且呢当他在定义的操作之后, 我指定了我要去通过这个s这个schedule. 来对他进行一个这样就相当于告诉啊我的程序, 当我在发起我这个订阅作的时候, 请你把这个执行上下文交给到我的这个s. 所以呢即使我的, 我的这个的动作是从我们的这个匿名的这个线程去发现. 那当我去跑这个程序的时候, 我依然是看到我所有的future和map的操作都是从这个我定义的这个schedule上面去发起的这个呢就是一个最简单的作用. 那我们这边稍微去覆盖一下一个比较极端的, 那好比说我这边小心我定义了另外一个, 我给他另外一个这个. 那么我不小心在我这个flux的定义的过, 我又重新去覆盖了我这个小蛋糕. 然后并且给进了他的s二这样的一个, 那么这个时候大家才会发生什么呀？我们来跑一下, 去看一下结果. 大家看到这边跑完之后呢, 其实真正起作用的这些filter和map的话, 依然是在我定义的上面去进行的, 也就是说我这个私家的s二是没有起作用的. 这个也是符合预期的, 因为呢对于整个的一个响应是流的操作链上面定义的, 如果出现多个的话, 它只会由第一个会生效, 后面的一些呢都会直接被忽略不计. 讲完了小孩下面呢我们来看一看, puppy跟on非常类似, 他也是直接定义在响应时流的链路上. 它的作用域呢是在它的下游操作, 所以在这个例子里面它的作用就是这个map操作. 具体的来说, 当他从上游接收到的元素之后, 它会在这个schedule的定义的执行上下文当中的去调用下游的方法将元素进行传输, 并且所有的后续的操作服务. 都会默认在这个线程上去执行, 我们来直接跑一下这个测试用例去看一下. 大家看到在这里呢, 当我们发起音乐的时候, 我们其实是在这个匿名县城里面去执行的操作, 所以大家看到我的从source到之前的这个, 它其实都在这个匿名县城上执行的. 那奥姆经历了之后呢, 根据我们之前的一个规范, 他会从定义的线程池当中取一个来作为执行线程. 所以这边的map方法呢, 我们看到这边的方法会从demo这个操作内容去执行. 那我们这边再来看一看另外一个极端情况, 我这边去指定了多个. 这边呢我给定另外一个加了, 那这个可能是一个提出加购的一个家去了, 并且我把它在了filter的前面. 我们再来跑一下, 看一下这个结果. 大家看到吧？那我这边第一个publish on s二呢, 他这个作用其实应该是在42~47行之间, 也就是这个filter操作. 所以我们看到在这个日志当, 我这个filter操作是在我p two杠1-, 也就是我这个s二的schedule当中去. 操作的也就是我的s二那, 那么对于下面一个map操作呢, 我们来看一下. 这边的卖操作它是由于我们建议的, 所以呢它是在s这个schedule的上面定义的线程去操作的. 这块儿跟我们去声明多个subscribe我们的情况呢稍微是有一是有一. 那最后呢我们来看一看, 我把结合在一起放在一个调用链路上去执行, 是什么样的一个结果？我直接去跑下. 现在看到啊, 其实我这个它的作用域是从定义我这个be的动作是你就是我的订阅操作开始. 然后呢他是从响应式流的这个源头就开始作用的. 一直作用到我出现了pap, 所以呢他真正起作用的是在65行到70行之间的这个操作, 那么看到在71行操作之前呢就是这个filter操作. 他其实是用了这个定义的这个感觉. 那么当我去在71行定义了这个之后呢, 这后面的操作的上下文就被p一这个schedule给接管了, 所以大家看到因为我的map的话, 它是在我的也就是我的p一的. 这个家具的上面去. 所以当大家以后要去分析和的作用域, 就可以用这种方法来进行推理. 
+
+
+
+---
+
+, 下面呢我们来讲一下刚刚例子中我们用到的这个方法. 框架呢提供了两种方法来让我们改变执行的, 分别是subscribe和他们都会接受一个schedule的作为入参, 并且呢把执行的上下文切换到传入的schedule上. 那在这一小, 我们来结合例子判断出来和的区别, 首先呢我们来看一看, subscribe on它其实是作用在小process上的, 也就是在发起, 订阅的流程上, 那我们是什么时候会发起这个医院的？当我们去调用方法的时候, 我们就发起了这个订阅. 所以呢你不管把这个放在我们这个定义的定义的flux操作的哪一个位置对对在这个我们定义的一个比较简单的on的这个方法帮助, 我定义了一个流, 并且呢当他在定义的操作之后, 我指定了我要去通过这个s这个schedule. 来对他进行一个这样就相当于告诉啊我的程序, 当我在发起我这个订阅作的时候, 请你把这个执行上下文交给到我的这个s. 所以呢即使我的, 我的这个的动作是从我们的这个匿名的这个线程去发现. 那当我去跑这个程序的时候, 我依然是看到我所有的future和map的操作都是从这个我定义的这个schedule上面去发起的这个呢就是一个最简单的作用. 那我们这边稍微去覆盖一下一个比较极端的, 那好比说我这边小心我定义了另外一个, 我给他另外一个这个. 那么我不小心在我这个flux的定义的过, 我又重新去覆盖了我这个小蛋糕. 然后并且给进了他的s二这样的一个, 那么这个时候大家才会发生什么呀？我们来跑一下, 去看一下结果. 大家看到这边跑完之后呢, 其实真正起作用的这些filter和map的话, 依然是在我定义的上面去进行的, 也就是说我这个私家的s二是没有起作用的. 这个也是符合预期的, 因为呢对于整个的一个响应是流的操作链上面定义的, 如果出现多个的话, 它只会由第一个会生效, 后面的一些呢都会直接被忽略不计. 讲完了小孩下面呢我们来看一看, puppy跟on非常类似, 他也是直接定义在响应时流的链路上. 它的作用域呢是在它的下游操作, 所以在这个例子里面它的作用就是这个map操作. 具体的来说, 当他从上游接收到的元素之后, 它会在这个schedule的定义的执行上下文当中的去调用下游的方法将元素进行传输, 并且所有的后续的操作服务. 都会默认在这个线程上去执行, 我们来直接跑一下这个测试用例去看一下. 大家看到在这里呢, 当我们发起音乐的时候, 我们其实是在这个匿名县城里面去执行的操作, 所以大家看到我的从source到之前的这个, 它其实都在这个匿名县城上执行的. 那奥姆经历了之后呢, 根据我们之前的一个规范, 他会从定义的线程池当中取一个来作为执行线程. 所以这边的map方法呢, 我们看到这边的方法会从demo这个操作内容去执行. 那我们这边再来看一看另外一个极端情况, 我这边去指定了多个. 这边呢我给定另外一个加了, 那这个可能是一个提出加购的一个家去了, 并且我把它在了filter的前面. 我们再来跑一下, 看一下这个结果. 大家看到吧？那我这边第一个publish on s二呢, 他这个作用其实应该是在42~47行之间, 也就是这个filter操作. 所以我们看到在这个日志当, 我这个filter操作是在我p two杠1-, 也就是我这个s二的schedule当中去. 操作的也就是我的s二那, 那么对于下面一个map操作呢, 我们来看一下. 这边的卖操作它是由于我们建议的, 所以呢它是在s这个schedule的上面定义的线程去操作的. 这块儿跟我们去声明多个subscribe我们的情况呢稍微是有一是有一. 那最后呢我们来看一看, 我把结合在一起放在一个调用链路上去执行, 是什么样的一个结果？我直接去跑下. 现在看到啊, 其实我这个它的作用域是从定义我这个be的动作是你就是我的订阅操作开始. 然后呢他是从响应式流的这个源头就开始作用的. 一直作用到我出现了pap, 所以呢他真正起作用的是在65行到70行之间的这个操作, 那么看到在71行操作之前呢就是这个filter操作. 他其实是用了这个定义的这个感觉. 那么当我去在71行定义了这个之后呢, 这后面的操作的上下文就被p一这个schedule给接管了, 所以大家看到因为我的map的话, 它是在我的也就是我的p一的. 这个家具的上面去. 所以当大家以后要去分析和的作用域, 就可以用这种方法来进行推理. 
 
 
 
