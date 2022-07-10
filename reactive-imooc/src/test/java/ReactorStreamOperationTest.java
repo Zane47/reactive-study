@@ -1,3 +1,4 @@
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -8,13 +9,21 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 public class ReactorStreamOperationTest {
+
+    @Test
+    public void subscribeMethod() {
+        Flux<String> stockSeq1 = Flux.just("APPL", "AMZN", "TSLA");
+        stockSeq1.log().subscribe();
+    }
+
+
     @Test
     public void streamMap() {
         Flux<Integer> ints = Flux.range(1, 4);
         Flux<Integer> mapped = ints.map(i -> i * 2);
         mapped
-                .log()
-                .subscribe();
+            .log()
+            .subscribe();
     }
 
     @Test
@@ -22,8 +31,8 @@ public class ReactorStreamOperationTest {
         Flux<Integer> ints = Flux.range(1, 4);
         Flux<Integer> filtered = ints.filter(i -> i % 2 == 0);
         filtered
-                .log()
-                .subscribe();
+            .log()
+            .subscribe();
     }
 
     @Test
@@ -31,8 +40,8 @@ public class ReactorStreamOperationTest {
         Flux<Integer> ints = Flux.range(1, 40);
         Flux<List<Integer>> buffered = ints.buffer(3);
         buffered
-                .log()
-                .subscribe();
+            .log()
+            .subscribe();
     }
 
     @Test
@@ -45,39 +54,39 @@ public class ReactorStreamOperationTest {
             return "https://www.baidu.com";
         });
         client
-                .log()
-                .retry(3)
-                .subscribe();
+            .log()
+            .retry(3)
+            .subscribe();
     }
 
     @Test
     public void streamRetryOnFlux() throws InterruptedException {
         Flux<Long> flux = Flux.generate(
-                AtomicLong::new,
-                (state, sink) -> {
-                    long i = state.getAndIncrement();
-                    sink.next(i);
-                    if (i == 10) sink.error(new RuntimeException("i don't like 10"));
-                    return state;
-                },
-                (state) -> System.out.println("I'm done")
+            AtomicLong::new,
+            (state, sink) -> {
+                long i = state.getAndIncrement();
+                sink.next(i);
+                if (i == 10) sink.error(new RuntimeException("i don't like 10"));
+                return state;
+            },
+            (state) -> System.out.println("I'm done")
         );
         flux
-                .log()
-                .retry(1)
+            .log()
+            .retry(1)
 //                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(5)))
 //                .retryWhen(Retry.backoff(3, Duration.ofSeconds(2)))
-                .subscribe();
+            .subscribe();
         Thread.sleep(10000);
     }
 
     @Test
-    public void streamZip(){
+    public void streamZip() {
         Flux<Integer> fluxA = Flux.range(1, 4);
         Flux<Integer> fluxB = Flux.range(5, 5);
         fluxA
-                .zipWith(fluxB, (a, b)-> a+b)
-                .log()
-                .subscribe();
+            .zipWith(fluxB, (a, b) -> a + b)
+            .log()
+            .subscribe();
     }
 }

@@ -7,7 +7,7 @@ import reactor.core.publisher.Flux;
 import java.util.function.Consumer;
 
 @Slf4j
-public class StreamSubscribeTest {
+public class ReactorStreamSubscribeTest {
     @Test
     public void subscribeMethod() {
         Flux<String> stockSeq1 = Flux.just("APPL", "AMZN", "TSLA");
@@ -51,11 +51,12 @@ public class StreamSubscribeTest {
         Consumer<? super Subscription> subscriptionConsumer2 = sub -> sub.request(3);
         Consumer<? super Subscription> subscriptionConsumer3 = sub -> sub.request(5);
         Consumer<? super Subscription> subscriptionConsumer4 = sub -> sub.cancel();
+        Consumer<? super Subscription> subscriptionConsumer5 = sub -> sub.getClass();
 
-        ints.subscribe(i -> log.info(String.valueOf(i)),
+        ints.log().subscribe(i -> log.info(String.valueOf(i)),
                 null,
                 () -> log.info("Subscription completed"),
-                subscriptionConsumer4
+                subscriptionConsumer5
         );
     }
 

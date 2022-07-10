@@ -616,27 +616,550 @@ Thread.sleep(10000);
 
 ## 流的操作
 
+上一节创建了响应式流, 这一小节说如何操作这些流
+
 ### 订阅
 
+Reactor框架中提供几种流订阅方法
 
+#### subscribe
 
+最基本的操作, 不会打印任何东西, 只会去触发流的生产过程.
 
+log函数是Flux提供的一个方法, 用来代码调试和帮助我们理解reactor内部做了哪些事情
 
+```java
+public void subscribeMethod() {
+    Flux<String> stockSeq1 = Flux.just("APPL", "AMZN", "TSLA");
+    stockSeq1.log().subscribe();
+}
+```
 
+运行后日志:
 
+```
+15:22:30.714 [main] INFO reactor.Flux.Array.1 - | onSubscribe([Synchronous Fuseable] FluxArray.ArraySubscription)
+15:22:30.719 [main] INFO reactor.Flux.Array.1 - | request(unbounded)
+15:22:30.719 [main] INFO reactor.Flux.Array.1 - | onNext(APPL)
+15:22:30.719 [main] INFO reactor.Flux.Array.1 - | onNext(AMZN)
+15:22:30.719 [main] INFO reactor.Flux.Array.1 - | onNext(TSLA)
+15:22:30.721 [main] INFO reactor.Flux.Array.1 - | onComplete()
+```
 
+1. onSubscribe([Synchronous Fuseable] FluxArray.ArraySubscription): 调用onSubscribe方法生成了ArraySubscription
+2. request(unbounded): 在subscription中, 订阅者去请求了无限多个元素. 就是告诉flux(也就是发布者)有多少的元素请全部发送给我
+3. onNext(..): 发布者Publisher接收到这个请求之后, 会依次调用onNext将元素发送给下游. 3,4,5行
+4. onComplete: 当整个元素发送结束之后, Publisher调用onComplete去结束这个发布, 就是告诉订阅者, 你的这一次订阅已经结束了. 如果中间有错误的话, 那么他就会在这里调用onError, 也会结束整个发送的过程.
 
+总结: 
 
+* 一次调用request请求无限多个元素
+* 多次调用onNext向订阅者发送元素
+* 最后的调用onComplete结束整个流程
 
+#### errorConsumer
 
+```java
+public void subscribeWithErrorConsumer() {
+    Flux<Integer> ints = Flux.range(1, 4)
+        .map(i -> {
+            if (i <= 3) return i;
+            throw new RuntimeException("i>3");
+        });
+    
+    ints.subscribe(
+        i -> log.info(String.valueOf(i)),
+        err -> log.error("error: {}", err.getMessage())
+    );
+}
+```
 
+1. 首先定义一个会抛出异常的响应式的流. `Flux.range(1, 4)`, 如果小于3正常发送, 大于3抛出异常
 
+2. 然后`ints.subscribe` 这个订阅方法用两个lambda来定义了消费者, 
+   * 第一个消费者是正常的元素消费, 简单的打印日志
+   * 第二个消费者错误消费者, 通过第一个参数可以拿到这个错误的信息(Throwable格式), 因为上面会抛出exception, 就可以在这里查看他的错误信息以及做一些其他的操作
 
+运行结果:
 
+```
+15:35:47.327 [main] INFO ReactorStreamSubscribeTest - 1
+15:35:47.327 [main] INFO ReactorStreamSubscribeTest - 2
+15:35:47.327 [main] INFO ReactorStreamSubscribeTest - 3
+15:35:47.335 [main] ERROR ReactorStreamSubscribeTest - error: i>3
+```
 
+可以看到1,2,3是正常的打印. 当打印第四个元素的时候, 因为抛出的异常, 所以相应的在这边它会记录下来这个异常
 
+#### completeConsumer
 
+```java
+public void subscribeWithErrorConsumerAndCompleteConsumer() {
+    Flux<Integer> ints = Flux.range(1, 4)
+        .map(i -> {
+            if (i <= 3) return i;
+            throw new RuntimeException("i>3");
+        });
+    ints.subscribe(
+        i -> log.info(String.valueOf(i)),
+        err -> log.error("error: {}", err.getMessage()),
+        () -> log.info("Subscription completed")
+    ); //errorConsumer and complete consumer are mutually exclusive
+}
+```
 
+运行结果
+
+```
+15:44:51.865 [main] INFO ReactorStreamSubscribeTest - 1
+15:44:51.865 [main] INFO ReactorStreamSubscribeTest - 2
+15:44:51.865 [main] INFO ReactorStreamSubscribeTest - 3
+15:44:51.870 [main] ERROR ReactorStreamSubscribeTest - error: i>3
+```
+
+相比较又多了一个consumer, 当整个订阅成功完成就会去运行, 一般用途是去通知其他的一些服务, 表示订阅已经完成了.
+
+注意: errorConsumer and complete consumer are mutually exclusive
+
+**ErrorConsumer和completeConsumer不能够同时去被触发**, 作为一个flux来说, 要么去调用onComplete或者是onError来结束, 不能两个同时调用. 相对的当调用了onComplete就会触发CompleteComsumer, onError就会触发ErrorComsumer. 他们两个是不会同时出现在你的运行的时候. 
+
+可以写在一起, 只是不会同时触发.
+
+例如: 
+
+屏蔽掉error的, 改成null. 运行结果
+
+```
+15:43:26.222 [main] INFO ReactorStreamSubscribeTest - 1
+15:43:26.222 [main] INFO ReactorStreamSubscribeTest - 2
+15:43:26.222 [main] INFO ReactorStreamSubscribeTest - 3
+15:43:26.236 [main] ERROR reactor.core.publisher.Operators - Operator called default onErrorDropped
+reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.RuntimeException: i>3
+Caused by: java.lang.RuntimeException: i>3
+```
+
+#### subscriptionComsumer
+
+```java
+Flux<Integer> ints = Flux.range(1, 4);
+Consumer<? super Subscription> subscriptionConsumer1 = null;
+Consumer<? super Subscription> subscriptionConsumer2 = sub -> sub.request(3);
+Consumer<? super Subscription> subscriptionConsumer3 = sub -> sub.request(5);
+Consumer<? super Subscription> subscriptionConsumer4 = sub -> sub.cancel();
+Consumer<? super Subscription> subscriptionConsumer5 = sub -> sub.getClass();
+
+ints.log().subscribe(i -> log.info(String.valueOf(i)),
+                     null,
+                     () -> log.info("Subscription completed"),
+                     subscriptionConsumer1
+                    );
+```
+
+又多了一个subscriptionComsumer的lambda表达式, 有各种不同的况, 这里分类讨论一下:
+
+1. null
+
+就相当于没有传, 和之前一样. 在这个时候reactor框架会默认帮我们去请求所有的元素, 此时flux就会返回所有的1234并且打印出来
+
+结果是
+
+```
+16:51:32.734 [main] INFO reactor.Flux.Range.1 - | onSubscribe([Synchronous Fuseable] FluxRange.RangeSubscription)
+16:51:32.737 [main] INFO reactor.Flux.Range.1 - | request(unbounded)
+16:51:32.737 [main] INFO reactor.Flux.Range.1 - | onNext(1)
+16:51:32.738 [main] INFO ReactorStreamSubscribeTest - 1
+16:51:32.738 [main] INFO reactor.Flux.Range.1 - | onNext(2)
+16:51:32.738 [main] INFO ReactorStreamSubscribeTest - 2
+16:51:32.738 [main] INFO reactor.Flux.Range.1 - | onNext(3)
+16:51:32.738 [main] INFO ReactorStreamSubscribeTest - 3
+16:51:32.738 [main] INFO reactor.Flux.Range.1 - | onNext(4)
+16:51:32.738 [main] INFO ReactorStreamSubscribeTest - 4
+16:51:32.738 [main] INFO reactor.Flux.Range.1 - | onComplete()
+16:51:32.739 [main] INFO ReactorStreamSubscribeTest - Subscription completed
+```
+
+2. 请求的元素数量少于flux中的元素. sub.request(3)
+
+```
+16:52:38.212 [main] INFO reactor.Flux.Range.1 - | onSubscribe([Synchronous Fuseable] FluxRange.RangeSubscription)
+16:52:38.215 [main] INFO reactor.Flux.Range.1 - | request(3)
+16:52:38.215 [main] INFO reactor.Flux.Range.1 - | onNext(1)
+16:52:38.215 [main] INFO ReactorStreamSubscribeTest - 1
+16:52:38.215 [main] INFO reactor.Flux.Range.1 - | onNext(2)
+16:52:38.215 [main] INFO ReactorStreamSubscribeTest - 2
+16:52:38.215 [main] INFO reactor.Flux.Range.1 - | onNext(3)
+16:52:38.215 [main] INFO ReactorStreamSubscribeTest - 3
+```
+
+此时我的订阅就会只返回我请求的这三个元素, 也就是1, 2, 3
+
+3. 请求的元素数量多于flux中的元素. sub.request(5)
+
+```
+16:55:54.097 [main] INFO reactor.Flux.Range.1 - | onSubscribe([Synchronous Fuseable] FluxRange.RangeSubscription)
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | request(5)
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | onNext(1)
+16:55:54.100 [main] INFO ReactorStreamSubscribeTest - 1
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | onNext(2)
+16:55:54.100 [main] INFO ReactorStreamSubscribeTest - 2
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | onNext(3)
+16:55:54.100 [main] INFO ReactorStreamSubscribeTest - 3
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | onNext(4)
+16:55:54.100 [main] INFO ReactorStreamSubscribeTest - 4
+16:55:54.100 [main] INFO reactor.Flux.Range.1 - | onComplete()
+16:55:54.100 [main] INFO ReactorStreamSubscribeTest - Subscription completed
+```
+
+这个请求会在Flux返回他所有的元素, 也就是1到4之后直接结束掉. 他并不会去等着那个第五个不存在的元素去返回回来,他会在返回所有的之后结束掉整个的发送,
+
+4. sub.cancel(). 订阅一开始就取消
+
+```
+17:02:23.241 [main] INFO reactor.Flux.Range.1 - | onSubscribe([Synchronous Fuseable] FluxRange.RangeSubscription)
+17:02:23.243 [main] INFO reactor.Flux.Range.1 - | cancel()
+```
+
+这个时候Flux不会发给我们任何元素
+
+5. 没有向上游Publisher发送任何请求. 例如:sub.getClass()
+
+```
+17:04:03.376 [main] INFO reactor.Flux.Range.1 - | onSubscribe([Synchronous Fuseable] FluxRange.RangeSubscription)
+Process finished with exit code 0
+```
+
+没有向上游这个发送任何请求, 没有request, 没有cancel. -> Flux永远不会结束(这里结束是因为使用的Test结束了, 而并不是说flux是运行完成了)
+
+#### BaseSubscriber
+
+比使用lambda来定义一些consumer, 更加复杂一些, 但是功能会更强的一个订阅方法, 使用框架提供的BaseSubscriber来订阅
+
+Reactor框架推荐通过继承BaseSubscriber来实现自己的Subscriber, 如下
+
+```java
+public void subscribeWithBaseSubscriber() {
+    Flux<Integer> ints = Flux.range(1, 4);
+    ints.subscribe(new SampleSubscriber<>());
+}
+public class SampleSubscriber<T> extends BaseSubscriber<T> {
+    @Overrid
+    public void hookOnSubscribe(Subscription subscription) {
+        log.info("Subscribed");
+        request(1);
+    }
+
+    @Override
+    public void hookOnNext(T value) {
+        log.info(value.toString());
+        request(1);
+    }
+}
+```
+
+BaseSubscriber中源代码, hookonSubscribe把所有元素一次性请求出来, 处理起来就相当于是一个没有被压的, 相当于跟我的发布者说你有多少元素请你通通发给我. -> 这个在某些业务场景里面是有问题的
+
+```java
+protected void hookOnSubscribe(Subscription subscription){
+    subscription.request(Long.MAX_VALUE);
+}
+```
+
+可以看到代码中写了一个最基础的背压, 首先在创建了subscription之后就是这个调用了hookOnSubscribe的方法, 只请求了一个元素. 然后等到发送者发送给我这个元素之后(hookOnNext), 把它打印出来, 相当于这边就做了一个处理, 并且再请求下一个元素. 
+
+这样的话就相当于说由我们自己写的这个SampleSubscriber来控制我们消费的速度. 而不是一股脑的说元素全部发送给我, 然后再调用我的onNext做处理, 这样子很可能出现问题
+
+此外的话, BaseSubscriber也提供其他的hook方法. 可以通过重写里面的一些hookOnError, hookOnCancel和finally等不同的方法来定义这整个Subscriber的行为
+
+---
+
+那么上面说的两种订阅方法, lambda和BaseSubscriber, 分别在什么场景使用?
+
+最直接的一个答案就是需不需要在消费端去定义背压操作. lambda除了最后一个示例, 其他都会默认请求无限多个元素, 相当于是禁用了背压的功能. 如果背压不是一个重要考量的标准, 那么是没有问题的. 否则就得继承BaseSubscriber覆写里面的方法来实现自己程序的背压操作, 就是对你自己的处理进行管控.
+
+### 中间操作
+
+上面是Publisher和subscriber, 接下来看一下位于中间的操作.
+
+这些中间操作会作用在Publisher发布者上, 并且将它包装成一个新的publisher实例, 这样的话, 从原始数据产生的第一个publisher经过多个Operators直到被一个subscriber订阅消费结束整个流程, 类似于Java Stream.
+
+#### Map
+
+<img src="img/reactive-study/mapForFlux.svg" alt="img" style="zoom:80%;" />
+
+Transform the items emitted by this [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) by applying a synchronous function to each item.
+
+Function接口类型作为入参, 也就是mapper, 按照mapper的逻辑对元素进行一些处理.
+
+首先这边定义了一个flux.range是从1~4, 然后定义mapper是将每一个元素乘以二. 用log查看执行的内容, 并且用空的subscribe方法让元素真正的去向下游传递
+
+```java
+public void streamMap() {
+    Flux<Integer> ints = Flux.range(1, 4);
+    Flux<Integer> mapped = ints.map(i -> i * 2);
+    mapped
+        .log()
+        .subscribe();
+}
+```
+
+```java
+public final <V> Flux<V> map(Function<? super T, ? extends V> mapper) {
+    if (this instanceof Fuseable) {
+        return onAssembly(new FluxMapFuseable<>(this, mapper));
+    }
+    return onAssembly(new FluxMap<>(this, mapper));
+}
+```
+
+输出结果:
+
+```
+17:34:13.198 [main] INFO reactor.Flux.MapFuseable.1 - | onSubscribe([Fuseable] FluxMapFuseable.MapFuseableSubscriber)
+17:34:13.205 [main] INFO reactor.Flux.MapFuseable.1 - | request(unbounded)
+17:34:13.205 [main] INFO reactor.Flux.MapFuseable.1 - | onNext(2)
+17:34:13.205 [main] INFO reactor.Flux.MapFuseable.1 - | onNext(4)
+17:34:13.205 [main] INFO reactor.Flux.MapFuseable.1 - | onNext(6)
+17:34:13.205 [main] INFO reactor.Flux.MapFuseable.1 - | onNext(8)
+17:34:13.206 [main] INFO reactor.Flux.MapFuseable.1 - | onComplete()
+```
+
+#### filter
+
+<img src="img/reactive-study/filterForFlux.svg" alt="img" style="zoom:80%;" />
+
+Evaluate each source value against the given [`Predicate`](https://docs.oracle.com/javase/8/docs/api/java/util/function/Predicate.html?is-external=true). If the predicate test succeeds, the value is emitted. If the predicate test fails, the value is ignored and a request of 1 is made upstream.
+
+Predict作为入参, 对每个元素都根据这个来进行判断, 符合条件的向下传递
+
+```java
+public void streamFilter() {
+    Flux<Integer> ints = Flux.range(1, 4);
+    Flux<Integer> filtered = ints.filter(i -> i % 2 == 0);
+    filtered
+        .log()
+        .subscribe();
+}
+```
+
+```
+17:36:38.960 [main] INFO reactor.Flux.FilterFuseable.1 - | onSubscribe([Fuseable] FluxFilterFuseable.FilterFuseableSubscriber)
+17:36:38.965 [main] INFO reactor.Flux.FilterFuseable.1 - | request(unbounded)
+17:36:38.966 [main] INFO reactor.Flux.FilterFuseable.1 - | onNext(2)
+17:36:38.966 [main] INFO reactor.Flux.FilterFuseable.1 - | onNext(4)
+17:36:38.966 [main] INFO reactor.Flux.FilterFuseable.1 - | onComplete()
+```
+
+#### Buffer
+
+<img src="img/reactive-study/buffer.svg" alt="img" style="zoom:80%;" />
+
+Collect all incoming values into a single [`List`](https://docs.oracle.com/javase/8/docs/api/java/util/List.html?is-external=true) buffer that will be emitted by the returned [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) once this Flux completes.
+
+把上游传递过来的元素组装成一个分段的列表. 当当前buffer当中累积的元素数量达到我们设定的缓冲大小之后, 会把这个列表向下传递
+
+```java
+public void streamBuffer() {
+    Flux<Integer> ints = Flux.range(1, 40);
+    Flux<List<Integer>> buffered = ints.buffer(3);
+    buffered
+        .log()
+        .subscribe();
+}
+```
+
+```
+17:39:09.583 [main] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+17:39:09.610 [main] INFO reactor.Flux.Buffer.1 - onSubscribe(FluxBuffer.BufferExactSubscriber)
+17:39:09.612 [main] INFO reactor.Flux.Buffer.1 - request(unbounded)
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([1, 2, 3])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([4, 5, 6])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([7, 8, 9])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([10, 11, 12])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([13, 14, 15])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([16, 17, 18])
+17:39:09.613 [main] INFO reactor.Flux.Buffer.1 - onNext([19, 20, 21])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([22, 23, 24])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([25, 26, 27])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([28, 29, 30])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([31, 32, 33])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([34, 35, 36])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([37, 38, 39])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onNext([40])
+17:39:09.614 [main] INFO reactor.Flux.Buffer.1 - onComplete()
+```
+
+Flux.range的是从1~40这40个整数,并且设定buffer的大小是3, 就会三个元素一组向下传递, 这边x的元素其实是一个list of Interage
+
+那最后一个元素不满三个怎么办？最终是直接将这个40这个单独的元素打印了出来. 缓冲区的最后一个元素如果是只有一个的话, 即使它不满我们的Buffer大小, 但是依然还是会继续向下游去发送
+
+#### Retry
+
+<img src="img/reactive-study/retryForFlux.svg" alt="img" style="zoom:80%;" />
+
+Re-subscribes to this [`Flux`](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html) sequence if it signals any error, indefinitely.
+
+在这个stream的传递过程当中任意一个地方如果报错的话, 那么他就会重新的去订阅这个发布. 例如下面设置重试3次, 也就是说他最多会去retry三次. 那么如果三次没有成功的话, 就会结束整个的一个定义过程.
+
+一般用来调用外部api, 可能由于某一些网络原因的话, 这个API可能会报错
+
+```java
+public void streamRetry() {
+    Mono<String> client = Mono.fromSupplier(() -> {
+        double num = Math.random();
+        if (num > 0.01) {
+            throw new Error("Network issue");
+        }
+        return "https://www.baidu.com";
+    });
+    client
+        .log()
+        .retry(3)
+        .subscribe();
+}
+```
+
+```
+17:48:10.186 [main] INFO reactor.Mono.Supplier.1 - | onSubscribe([Fuseable] Operators.MonoSubscriber)
+17:48:10.189 [main] INFO reactor.Mono.Supplier.1 - | request(unbounded)
+17:48:10.197 [main] ERROR reactor.Mono.Supplier.1 - | onError(java.lang.Error: Network issue)
+17:48:10.200 [main] ERROR reactor.Mono.Supplier.1 - 
+java.lang.Error: Network issue
+17:48:10.200 [main] INFO reactor.Mono.Supplier.1 - | onSubscribe([Fuseable] Operators.MonoSubscriber)
+17:48:10.201 [main] INFO reactor.Mono.Supplier.1 - | request(unbounded)
+17:48:10.201 [main] ERROR reactor.Mono.Supplier.1 - | onError(java.lang.Error: Network issue)
+17:48:10.201 [main] ERROR reactor.Mono.Supplier.1 - 
+java.lang.Error: Network issue
+17:48:10.202 [main] INFO reactor.Mono.Supplier.1 - | onSubscribe([Fuseable] Operators.MonoSubscriber)
+17:48:10.202 [main] INFO reactor.Mono.Supplier.1 - | request(unbounded)
+17:48:10.202 [main] ERROR reactor.Mono.Supplier.1 - | onError(java.lang.Error: Network issue)
+17:48:10.202 [main] ERROR reactor.Mono.Supplier.1 - 
+java.lang.Error: Network issue
+17:48:10.207 [main] ERROR reactor.core.publisher.Operators - Operator called default onErrorDropped
+reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.Error: Network issue
+Caused by: java.lang.Error: Network issue
+```
+
+retry3次, 加上第一次的正常调用, 总共是4次调用这个订阅的操作
+
+注意:
+
+**retry的时候会消费整个stream, 需要特别注意元素重复消费的问题, 特别是在有多个元素的Flux流中.** 下面的例子
+
+```java
+public void streamRetryOnFlux() throws InterruptedException {
+    Flux<Long> flux = Flux.generate(
+        AtomicLong::new,
+        (state, sink) -> {
+            long i = state.getAndIncrement();
+            sink.next(i);
+            if (i == 10) sink.error(new RuntimeException("i don't like 10"));
+            return state;
+        },
+        (state) -> System.out.println("I'm done")
+    );
+    flux
+        .log()
+        .retry(1)
+        //                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(5)))
+        //                .retryWhen(Retry.backoff(3, Duration.ofSeconds(2)))
+        .subscribe();
+    Thread.sleep(10000);
+}
+```
+
+Flux.generate是0-9, 10抛错, retry是1. 运行结果
+
+```
+17:56:30.686 [main] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+17:56:30.705 [main] INFO reactor.Flux.Generate.1 - | onSubscribe([Fuseable] FluxGenerate.GenerateSubscription)
+17:56:30.708 [main] INFO reactor.Flux.Generate.1 - | request(unbounded)
+17:56:30.709 [main] INFO reactor.Flux.Generate.1 - | onNext(0)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(1)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(2)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(3)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(4)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(5)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(6)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(7)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(8)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(9)
+17:56:30.710 [main] INFO reactor.Flux.Generate.1 - | onNext(10)
+17:56:30.716 [main] ERROR reactor.Flux.Generate.1 - | onError(java.lang.RuntimeException: i don't like 10)
+17:56:30.718 [main] ERROR reactor.Flux.Generate.1 - 
+java.lang.RuntimeException: i don't like 10
+I'm done
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onSubscribe([Fuseable] FluxGenerate.GenerateSubscription)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | request(unbounded)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(0)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(1)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(2)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(3)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(4)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(5)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(6)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(7)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(8)
+17:56:30.719 [main] INFO reactor.Flux.Generate.1 - | onNext(9)
+17:56:30.720 [main] INFO reactor.Flux.Generate.1 - | onNext(10)
+17:56:30.720 [main] ERROR reactor.Flux.Generate.1 - | onError(java.lang.RuntimeException: i don't like 10)
+17:56:30.720 [main] ERROR reactor.Flux.Generate.1 - 
+java.lang.RuntimeException: i don't like 10
+I'm done
+```
+
+第一次当我们去消费0~9之后呢, 到10抛错. 然后这个时候Subscribe动作就会重新去订阅这个发布. 于是我们又从零开始消费了一遍, 也就是说这边0~9其实都是属于一个重复消费的一个状态. 如果你在这个subscribe之前的一些重复处理没有做好, 对于重复消费或者幂等的一些处理的话, 就很容易出问题 
+
+**使用retry的时候千万要注意这一点**
+
+```java
+flux
+    .log()
+    .retry(1)
+    //                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(5)))
+    //                .retryWhen(Retry.backoff(3, Duration.ofSeconds(2)))
+    .subscribe();
+```
+
+Retry.fixedDelay和Retry.backoff可以设置定长的延迟或者是退避策略
+
+#### zip
+
+<img src="img/reactive-study/zipIterableSourcesForFlux.svg" alt="img" style="zoom:80%;" />
+
+Zip multiple sources together, that is to say wait for all the sources to emit one element and combine these elements once into an output value (constructed by the provided combinator). The operator will continue doing so until any of the sources completes. Errors will immediately be forwarded. This "Step-Merge" processing is especially useful in Scatter-Gather scenarios.
+
+将两个响应式流合并成一个流
+
+````java
+public void streamZip() {
+    Flux<Integer> fluxA = Flux.range(1, 4);
+    Flux<Integer> fluxB = Flux.range(5, 4);
+    fluxA
+        .zipWith(fluxB, (a, b) -> a + b)
+        .log()
+        .subscribe();
+}
+````
+
+定义fluxA里面有元素1~4, fluxB里面有元素5~8. 在fluxA上面去zip with, 然后给定fluxB, 也就是我们的目标的响应式流, 还有combinator就是就是如何将两个对应位置上的元素合并在一起, 这边简单的做一个相加, 然后记录log, 并且去真正的用subscribe去触发这个操作. 1+5, 2+6, 3+7, 4+8
+
+结果
+
+```
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onSubscribe(FluxZip.ZipCoordinator)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - request(unbounded)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onNext(6)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onNext(8)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onNext(10)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onNext(12)
+18:00:49.827 [main] INFO reactor.Flux.Zip.1 - onComplete()
+```
+
+注意:
+
+zip操作会直到两个流其中的任意一个元素耗尽的为止
+
+例如上面的FluxB改为`Flux<Integer> fluxB = Flux.range(5, 5);`, 结果依然是四个元素, 因为FluxB中的第五个元素, 他并没有对应的FluxA的元素去跟他进行结合, 他就被抛弃了
 
 
 
@@ -648,9 +1171,7 @@ Thread.sleep(10000);
 
 ---
 
-
-
-小姐, 我们简单的介绍了如何创建一个响应石流, 那么在这一小节呢, 我们会开始去介绍一些如何去操作创建出来的这些流. 提到流的操作, 却绕不开一个最基本的操作就是订阅. 在框架中呢, 他提供了以下几种瘤的订阅方式, 我们来结合代码来看一下. 首先第一个他是一个最基本的一个订阅, 这个不会打印任何东西, 他只会去触发这个流的一个生产的一个过程. 但是我们先来看一下这个log函数啊, 这个log函数是那个flux上面提供的一个方法, 他在做代码调试和帮助我们理解react的内部做了哪些事情的时候其实是很好的. 我们先来跑一下, 然后看一下这个log里面有哪些信息是打印出来的. 我在看到这个最简单的方法呢, 对于一个来说, 它打印出了一共有六行日志, 我们来逐行分析一下. 第一行的是一方法, 它调用这个方法之后呢生成了一个然后在这个里, 我们的订阅者去请求了无限多个元素, 就是告诉我们的flux, 也就是我们的发布者, 呃, 你有多少的元素请全部发送给我, 那么当我们的发布者帕贝尔接收到这个请求之后, 他就会依次调用将这个呃, 元素发送给下游, 所以就是这边的第345行. 那么当整个送结束之后呢, 他会调用uncle去结束这个发布, 就是告诉我们的订阅者, 你的这一次订阅已经出了呃如果中间有错误的话, 那么他就会在这里调用on error去, 呃, 也是会结束整个一个发送的过程, 所以这边总结起来的重点就是一次调用request请求无限多个元素. 多次调研向订阅者发送元素以及最后的调用, 结束整个的一个发送过程第二个我们来看一下一个带着handling的这样的一个订阅模式. 啊, 首先我们要定一个会抛出异常的这样一个响应式的啊, 这里话我就简单的写了一个flux, 然后它是会送1234. 啊, 这四个元素当这个元素的值小于三的时候就正常发送, 如果大于三的话, 那么我们就抛出一个异常, 大家看到这边的subscribe的话, 这个订阅方法它其实是有两个. 来定义了消费者, 那么第一个消费者呢就是一个正常的元素的一个消费, 他会我们这边只是去简单的打印一下一个日志. 那第二个消费者就是我们的错误, 消费者这边的话通过第一个参数我们是可以拿到这个错误的信息. 他是一个格式, 因为我们这边是一个村出来的一个exception, 那么我们可以在这里面去给他的啊看他的错误信息以及做一些其他的一些操作. 我们这边也跑一下, 去看一下它的运行结果. 在看到在这里的话, 123那就是正常的去打印出来, 那么当我第呃打印第四个元素的时候, 因为我第四个元素抛出的异常, 所以相应的在这边的话, 它会记录下来这个异常. 下面一个订阅呢相比较上半年就多了一个consumer. 这个就是当我们整个订阅成功完成的成的就会去运行, 一般来说的话就是用途就是说你去通知其他的一些服务, 表示说你的订阅已经完成了, 大家在这边要注意的一点是我们的consumer就是我的43环境的这个兰姆. 和第44号的这个打印的这一行, 他们是不能够同时去被触发的, 这是为什么呢？因为作为一个flux来说, 他要么去调用或者是调来结束, 它不可能两个同时去调用吗？那么相对应的你调用的时候你就会触发你的complete. On arrow呢就会触发你的, 所以这就是啊, 大家要记住这一点, 他们两个是不会同时出现在你的运行的时候. Ok, 那么下面一种情况呢？这个相, 它又多了一个叫substitution consumer的一个拉姆达表达式, 这边的话有各种不同的况, 我们来分类讨论一下, 第一种小学生consumer呢就是说我呃作为一个闹纸, 然后穿进去, 也就是这个就跟我们前面一样, 就没有传任何的consumer. 在这个时候呢, 呃, 框架会默认帮我们去请求所有的元素啊, 这个时候我的flux的话, 它就会返回我所有的1234并且打印出来. 然后第二种情况呢, 我请求的元素的数量少于这个flux里面的这个元素. 这个时候大家想会发生什？这个时候的话, 我的订阅就会只返回我请求的这三个元素, 也就是123. 那么第三种情, 当我去请求的元flux里面的元素数量的时候, 大家想会发生什么？它会还是会怎么样？好我来公布答案原始数据如果你请求的元素多于啊flux或者是一个响应式表里面现有的元素的话, 这个请求会在返回他所有的元素就是1~4之后直接结束掉. 他并不会说他去等着那个第五个不存在的元素去返回回来, 这个是没有的, 他会在返回所有的之后结束掉整个的发送, 那么在第四种情况呢？我直接就没有去啊, 没有去定义这个, 我直接就把他cancel掉了, 就代表说虽然我这个订阅, 但是我在订阅的一开始出发的时候就取消了这个地狱, 那么这个时候不会发给我们任何元素, 那么有意思的是最后一个情况最后一个情况的就是说我这边利用一个, 也就是说我没有像上游这个发送任何请求, 没有request, 没有cancel. 那这个时候会发生什么呢？这个时候这个flux大家一定记住了, 这个flux是不会结束的. 永远不会结束, 所以当这个时候好比说我这边去把它定义成在这个时候, 如果我去啊调用这个, 调用这个去访问的时候, 大家看的什么？大家看到只有一个, 对不对？他就没有一个或者之后的东西. 这个程序结束呢是因为我的整个这个测试的方法结束了, 而并不是说我的这个flux他真正的是运行完成了. 最后来带大家看一下呃比使用这些拉姆达的来记忆的一些consumer. 更加复杂一些, 但是功能会更强的一个订阅方法, 那就是使用rex框架提供的一个背景来进行订阅. 框架的推荐, 我们通过继承被对的, 这个抽象类的方法来写我们自己的一个最简单的一个需要我们重写. 户口on和hook on方法. 我们首先来看一下在这个里面默认在创建了这个subscription之后, 他的hook方法会通过调用request的这个方法来把所有的元素一次性给请求出来, 也就是一个这样我处理起来就会怎么样？就相当于是一个没有被压的, 对不对？相当于说呃我跟我跟我的发布者说你有多少元素请你通通发过发给我. 这个呢在某些业务场景里面肯定是有, 那么大家看看我在这个里面怎么样去写一个最基础的背压啊？首先我们在创建了这个之后就是这个调用这个户口的方法, 我只请求了一个元素. 然后等到发送者发送给我这个元素之后呢, 我把它打印出来, 相当于这边就做了一个处理, 并且我在请求下一个元素. 这样的话就相当于说由我们自己写的这个自己来控制我们消费的速度. 而不是一股脑的说你元素全部发送给我, 我呃当你去调用我的的在处理, 这样的话很有可能就会出现一些问题, 当然了, 此外的话, 那个reactor框架这个也提供了一些其他的一些互个方法. 你可以通过重写里面的一些户口啊on error, on cancel和finally这些不同的方法来定义这整个的一个行为. 这一块儿呢关于被一些源码的一些探探索, 就让啊同学们自己课后去看一看. 这么多不同的订, 有同学就会问老师我什么时候该用去做这样一个？什么时候该去继承来写这样一个比较复杂的一个订阅者？我觉得最直接的一个答案就是你需不需要在消费端去定义这样一个被压的一个操作. 兰方式的, 你看到除了最后一个以外, 他都会默认求无限多个元素, 从而呢就相当于是禁用了这个被压的功能. 如果被压的功能不是你的一个重要的考量的标准化, 那么用是没有问题的. 否则的话, 你就必须得去自己写自己的本, 然后通过复写里面的方法来实现你程序的一个这个被压的操作就是对你自己的处理进行一个一个管控. 前面我们已经讲完了. 流出的和, 那么下面呢我们来看一下位于他们之间的一些中间操作. 在reacto, 这些中间操作会作用在发布者上, 并且呢将它包装成一个新的实例. 这样的话, 从原始数据产生的第一个publisher经过多个直到被一个subscriber订阅消费结束整个流程. JAVA是比较类似的, 我们先来看一个比较常见的用法. 首先呢最常见的还是这个map的用法, 它需要一个方式接口的呃类型作为入参. 也就是他的maple, 并且呢他会按照maple的逻辑对元素进行一些处理. 我们看一下最简单的例子, 首先这边我定义了一个flux, 它的range是从1~4, 然后呢我这边的是定义是将每一个元素乘以二. 这边的话, 我用记录查看执行的内容, 并且用一个空的方法让来让元素真正的去向下游传递. 那么当我去真正的去跑这个方法的, 我们这边会看到我这边已经将所有的元素啊都乘以二, 并且就用了下想法. 那么下一个方法呢是f对每个元素都根据这个来进行判断, 符合条件的会向下去传递. 这边呢在这个例子当中, 我们还是用1~4来距离, 呃, 并且我们这边说一下的条件是呃只会将偶才会满足条件, 所以当我去对这个filter出来的flux去进行一个日志内容的查询的时候呢, 我应该只能看到二和四在这个里面. 所以大家看到这边是只有二跟四. 进行了向下游的一个传递. 下一个操作就稍微有一点意思了, 他是八分, 八分呢它会把上游传递过来的元素组装成一个分段的列表, 当当前offer当中累积的元素数量达到我们设定的缓冲大小之后呢, 他会把这个列表向下传递, 那在我们这个例子当中呢举例说明, 我们这边是呃range的是从1~40这40个整数并且呢我设定了我的buffer的大小是三, 所以呢就会三个元素一组向下传递, 我们来看一下运行的结果. 大家看这边运行完了之后, 它会将123组装成一个列表, 然后向下游传递456就装成一个列表向下游传递, 然后依此类推, 所以看到你这边x的元素其实是一个list of. 那最后一个元素不满三个怎么办呢？大家这边看一下我这个最后一个元素, 按照每三个一组的话, 所以40是一个单独的一个. 那么实际上呢我们看到最终是直接将这个40这个单独的元素打印了出来. 所以呢那缓冲区的元最后一个元素如果是只有一个的话, 即使它不满我们的设设区的大小, 但是依然还是会呃继续向下游去发送. 下一个方法呢是retry, 顾名思义的意思就是从事他会在这个stream的传递过程当中任意一个地方如果报错的话, 那么他就会重新的去订阅这个发布, 你在这里呢. 可以去指定这个的次数, 这边我们是指定的是三次, 也就是说他最多会去retry三次. 那么如果三次没有成功的话, 就会呃束掉整个的一个定义过程. 那在这里的话, 呃, 他一般用在的是比如说你要去调用外部的一些API, 但是可能由于某一些网络原因的话, 这个API可能会报那去模拟这个场景的, 我这边就用了一个model from supplier来定义这样一个string的一个呃一个source. 这边的话, 我给你的他的random大于0.01的时候, 就会报错也, 也就是说有99%的概率会出错, 那么当我去运行这个程序的时候呢, 我们就会看到如果调用这个抛出了异常的话, 你就是这一行的issue. 那么他就会再次去retry这个error这个订阅. 那这次retry呢？继续发现, 那么他会去再去传一遍, 这样的话, 一共三次, 加上我们之前的第一次的正常交友, 就会一共有四次去调用这个调用这个阅的这样一个操作, 所以呢这边是在我们去调用外部函数的时候是非常有用的一个操作. 在的时候呢, 大家还要记住, 因为它会消费整个stream, 所以呢你需要特别注意元素重复消费的问题. 特别流当中, 我们来看下面一个例子啊. 我们参照前面我们讲到的呃creation的方法, 我们这边创造了一个flux generation. 那么我们这个呢是从零开始生成元素, 那么到了第十个的话, 呃, 我就抛出了一个错误. , 也就是说我这边的generation就是一个从零开始, 0~9, 然后是抛醋的这样一个过程. 这个时候如果我设定了是一的话, 并且去想大家看一看会有什么结果？好, 这边跑完之后大家看一下, 第一次当我们去消费0~9之后呢, 到时的时候他就开始抛错然后, 然后告诉我说你这边抛出了一个runtime exception. 然后这个时候动作就会重新的去订阅这个发布. 于是我们又从零开始消费了一点, 也就是说这边0~9其实都是属于一个重复消费的一个状态. 如果你在这个subscribe之前的一些处理没有做好, 对于重复消费或者密档的一些处理的话, 就很容易出问题. 这里呢是大家在使用retry的时候要千万注意的一点, 那这边的71和72大家可以看到, 其实它还有一些可以定义一些呃fix或者是也就是定场的延迟或者是退避策略的. 这样一些错. 写法, 大家呢可以去看一下的文档, 然后去了解一下怎么样去做这种. Exponential by的一些女传. 下面一个方法的是zip, 这个zip的作用呢就是将两个响应是流合并成一个流. 我们来看一下这个用法. 在这里我定义了flux a代表里面有元素1~4, 那么它里面有元素5~8. 并且然后我们在flux a上面去zip with, 然后给定这个flux b, 也就是我们的目标的一个呃响应式流, 还有呢就是我们的就是如何将两个对应位置上的元素合并在, 我们这边是简单的做了一个商家, 然后我进入一下这个, 并且去真正的用去触发这个操作. 我们来跑一下进行下降, 所以得到了6, 8, 10, 12这四个数字, 这里要注意的一点呢是这个zip的操作, 它会直到两个流其中的任意一个元素耗尽的位置, 比如说我的xa, 如果有五个数1~4, 然后我的b呢有五个5~9这五个元素的话, 那么我去运行这个东西的时候, 我依然只会返回6, 8, 10, 12, 因为当中b中间的第五个元素, 他并没有对应的x的元素去跟他进行结合, 所以呢他最多他就被抛弃了. 在这里呢要注意的一点是这个zip的操作它会知道两个流其中的任意一个元素耗尽的时候就结束了. 那比如说我的当中有四个元素, 1~4, 那如果我的flux避风当中呢还有五个元素5~9. 那么这个时候我把两个呃flux, zip在一起的时候, 什么？他最多依然只能产生出四个元素, 因为中是只有四个, 当我的b当中的第五个元素九想要去找a, 跟他去进行一个合并的时候, 是找不到它对应的元素. 所以呢我们看到这边跑车的结果依然是只能返回六, 八十, 12这四个元素. `
+Ok, 那么下面一种情况呢？这个相, 它又多了一个叫substitution consumer的一个拉姆达表达式, 这边的话有各种不同的况, 我们来分类讨论一下, 第一种小学生consumer呢就是说我呃作为一个闹纸, 然后穿进去, 也就是这个就跟我们前面一样, 就没有传任何的consumer. 在这个时候呢, 呃, 框架会默认帮我们去请求所有的元素啊, 这个时候我的flux的话, 它就会返回我所有的1234并且打印出来. 然后第二种情况呢, 我请求的元素的数量少于这个flux里面的这个元素. 这个时候大家想会发生什？这个时候的话, 我的订阅就会只返回我请求的这三个元素, 也就是123. 那么第三种情, 当我去请求的元flux里面的元素数量的时候, 大家想会发生什么？它会还是会怎么样？好我来公布答案原始数据如果你请求的元素多于啊flux或者是一个响应式表里面现有的元素的话, 这个请求会在返回他所有的元素就是1~4之后直接结束掉. 他并不会说他去等着那个第五个不存在的元素去返回回来, 这个是没有的, 他会在返回所有的之后结束掉整个的发送, 那么在第四种情况呢？我直接就没有去啊, 没有去定义这个, 我直接就把他cancel掉了, 就代表说虽然我这个订阅, 但是我在订阅的一开始出发的时候就取消了这个地狱, 那么这个时候不会发给我们任何元素, 那么有意思的是最后一个情况最后一个情况的就是说我这边利用一个, 也就是说我没有像上游这个发送任何请求, 没有request, 没有cancel. 那这个时候会发生什么呢？这个时候这个flux大家一定记住了, 这个flux是不会结束的. 永远不会结束, 所以当这个时候好比说我这边去把它定义成在这个时候, 如果我去啊调用这个, 调用这个去访问的时候, 大家看的什么？大家看到只有一个, 对不对？他就没有一个或者之后的东西. 这个程序结束呢是因为我的整个这个测试的方法结束了, 而并不是说我的这个flux他真正的是运行完成了. 最后来带大家看一下呃比使用这些拉姆达的来记忆的一些consumer. 更加复杂一些, 但是功能会更强的一个订阅方法, 那就是使用rex框架提供的一个背景来进行订阅. 框架的推荐, 我们通过继承被对的, 这个抽象类的方法来写我们自己的一个最简单的一个需要我们重写. 户口on和hook on方法. 我们首先来看一下在这个里面默认在创建了这个subscription之后, 他的hook方法会通过调用request的这个方法来把所有的元素一次性给请求出来, 也就是一个这样我处理起来就会怎么样？就相当于是一个没有被压的, 对不对？相当于说呃我跟我跟我的发布者说你有多少元素请你通通发过发给我. 这个呢在某些业务场景里面肯定是有, 那么大家看看我在这个里面怎么样去写一个最基础的背压啊？首先我们在创建了这个之后就是这个调用这个户口的方法, 我只请求了一个元素. 然后等到发送者发送给我这个元素之后呢, 我把它打印出来, 相当于这边就做了一个处理, 并且我在请求下一个元素. 这样的话就相当于说由我们自己写的这个自己来控制我们消费的速度. 而不是一股脑的说你元素全部发送给我, 我呃当你去调用我的的在处理, 这样的话很有可能就会出现一些问题, 当然了, 此外的话, 那个reactor框架这个也提供了一些其他的一些互个方法. 你可以通过重写里面的一些户口啊on error, on cancel和finally这些不同的方法来定义这整个的一个行为. 这一块儿呢关于被一些源码的一些探探索, 就让啊同学们自己课后去看一看. 这么多不同的订, 有同学就会问老师我什么时候该用去做这样一个？什么时候该去继承来写这样一个比较复杂的一个订阅者？我觉得最直接的一个答案就是你需不需要在消费端去定义这样一个被压的一个操作. 兰方式的, 你看到除了最后一个以外, 他都会默认求无限多个元素, 从而呢就相当于是禁用了这个被压的功能. 如果被压的功能不是你的一个重要的考量的标准化, 那么用是没有问题的. 否则的话, 你就必须得去自己写自己的本, 然后通过复写里面的方法来实现你程序的一个这个被压的操作就是对你自己的处理进行一个一个管控. 前面我们已经讲完了. 流出的和, 那么下面呢我们来看一下位于他们之间的一些中间操作. 在reacto, 这些中间操作会作用在发布者上, 并且呢将它包装成一个新的实例. 这样的话, 从原始数据产生的第一个publisher经过多个直到被一个subscriber订阅消费结束整个流程. JAVA是比较类似的, 我们先来看一个比较常见的用法. 首先呢最常见的还是这个map的用法, 它需要一个方式接口的呃类型作为入参. 也就是他的maple, 并且呢他会按照maple的逻辑对元素进行一些处理. 我们看一下最简单的例子, 首先这边我定义了一个flux, 它的range是从1~4, 然后呢我这边的是定义是将每一个元素乘以二. 这边的话, 我用记录查看执行的内容, 并且用一个空的方法让来让元素真正的去向下游传递. 那么当我去真正的去跑这个方法的, 我们这边会看到我这边已经将所有的元素啊都乘以二, 并且就用了下想法. 那么下一个方法呢是f对每个元素都根据这个来进行判断, 符合条件的会向下去传递. 这边呢在这个例子当中, 我们还是用1~4来距离, 呃, 并且我们这边说一下的条件是呃只会将偶才会满足条件, 所以当我去对这个filter出来的flux去进行一个日志内容的查询的时候呢, 我应该只能看到二和四在这个里面. 所以大家看到这边是只有二跟四. 进行了向下游的一个传递. 下一个操作就稍微有一点意思了, 他是八分, 八分呢它会把上游传递过来的元素组装成一个分段的列表, 当当前offer当中累积的元素数量达到我们设定的缓冲大小之后呢, 他会把这个列表向下传递, 那在我们这个例子当中呢举例说明, 我们这边是呃range的是从1~40这40个整数并且呢我设定了我的buffer的大小是三, 所以呢就会三个元素一组向下传递, 我们来看一下运行的结果. 大家看这边运行完了之后, 它会将123组装成一个列表, 然后向下游传递456就装成一个列表向下游传递, 然后依此类推, 所以看到你这边x的元素其实是一个list of. 那最后一个元素不满三个怎么办呢？大家这边看一下我这个最后一个元素, 按照每三个一组的话, 所以40是一个单独的一个. 那么实际上呢我们看到最终是直接将这个40这个单独的元素打印了出来. 所以呢那缓冲区的元最后一个元素如果是只有一个的话, 即使它不满我们的设设区的大小, 但是依然还是会呃继续向下游去发送. 下一个方法呢是retry, 顾名思义的意思就是从事他会在这个stream的传递过程当中任意一个地方如果报错的话, 那么他就会重新的去订阅这个发布, 你在这里呢. 可以去指定这个的次数, 这边我们是指定的是三次, 也就是说他最多会去retry三次. 那么如果三次没有成功的话, 就会呃束掉整个的一个定义过程. 那在这里的话, 呃, 他一般用在的是比如说你要去调用外部的一些API, 但是可能由于某一些网络原因的话, 这个API可能会报那去模拟这个场景的, 我这边就用了一个model from supplier来定义这样一个string的一个呃一个source. 这边的话, 我给你的他的random大于0.01的时候, 就会报错也, 也就是说有99%的概率会出错, 那么当我去运行这个程序的时候呢, 我们就会看到如果调用这个抛出了异常的话, 你就是这一行的issue. 那么他就会再次去retry这个error这个订阅. 那这次retry呢？继续发现, 那么他会去再去传一遍, 这样的话, 一共三次, 加上我们之前的第一次的正常交友, 就会一共有四次去调用这个调用这个阅的这样一个操作, 所以呢这边是在我们去调用外部函数的时候是非常有用的一个操作. 在的时候呢, 大家还要记住, 因为它会消费整个stream, 所以呢你需要特别注意元素重复消费的问题. 特别流当中, 我们来看下面一个例子啊. 我们参照前面我们讲到的呃creation的方法, 我们这边创造了一个flux generation. 那么我们这个呢是从零开始生成元素, 那么到了第十个的话, 呃, 我就抛出了一个错误. , 也就是说我这边的generation就是一个从零开始, 0~9, 然后是抛醋的这样一个过程. 这个时候如果我设定了是一的话, 并且去想大家看一看会有什么结果？好, 这边跑完之后大家看一下, 第一次当我们去消费0~9之后呢, 到时的时候他就开始抛错然后, 然后告诉我说你这边抛出了一个runtime exception. 然后这个时候动作就会重新的去订阅这个发布. 于是我们又从零开始消费了一点, 也就是说这边0~9其实都是属于一个重复消费的一个状态. 如果你在这个subscribe之前的一些处理没有做好, 对于重复消费或者密档的一些处理的话, 就很容易出问题. 这里呢是大家在使用retry的时候要千万注意的一点, 那这边的71和72大家可以看到, 其实它还有一些可以定义一些呃fix或者是也就是定场的延迟或者是退避策略的. 这样一些错. 写法, 大家呢可以去看一下的文档, 然后去了解一下怎么样去做这种. Exponential by的一些女传. 下面一个方法的是zip, 这个zip的作用呢就是将两个响应是流合并成一个流. 我们来看一下这个用法. 在这里我定义了flux a代表里面有元素1~4, 那么它里面有元素5~8. 并且然后我们在flux a上面去zip with, 然后给定这个flux b, 也就是我们的目标的一个呃响应式流, 还有呢就是我们的就是如何将两个对应位置上的元素合并在, 我们这边是简单的做了一个商家, 然后我进入一下这个, 并且去真正的用去触发这个操作. 我们来跑一下进行下降, 所以得到了6, 8, 10, 12这四个数字, 这里要注意的一点呢是这个zip的操作, 它会直到两个流其中的任意一个元素耗尽的位置, 比如说我的xa, 如果有五个数1~4, 然后我的b呢有五个5~9这五个元素的话, 那么我去运行这个东西的时候, 我依然只会返回6, 8, 10, 12, 因为当中b中间的第五个元素, 他并没有对应的x的元素去跟他进行结合, 所以呢他最多他就被抛弃了. 在这里呢要注意的一点是这个zip的操作它会知道两个流其中的任意一个元素耗尽的时候就结束了. 那比如说我的当中有四个元素, 1~4, 那如果我的flux避风当中呢还有五个元素5~9. 那么这个时候我把两个呃flux, zip在一起的时候, 什么？他最多依然只能产生出四个元素, 因为中是只有四个, 当我的b当中的第五个元素九想要去找a, 跟他去进行一个合并的时候, 是找不到它对应的元素. 所以呢我们看到这边跑车的结果依然是只能返回六, 八十, 12这四个元素. `
 
 ## Scheduler的使用
 
@@ -698,10 +1219,9 @@ Thread.sleep(10000);
 
 # Ref
 
+* [Reactor-api](https://projectreactor.io/docs/core/release/api/)
 * [慕课网-Spring 5实战开发及新特性精讲](https://coding.imooc.com/class/538.html)
-
 * [慕课网-Spring Boot2.0深度实践之核心技术篇](https://coding.imooc.com/class/chapter/252.html#Anchor) -> 书本《Spring Boot编程思想(核心篇)》小马哥著
-
 * [ch5-reactor](https://github.com/ruoshuixuelabi/spring-five-course/tree/master/ch5-reactor)
 
 
