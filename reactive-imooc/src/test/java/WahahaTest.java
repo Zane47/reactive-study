@@ -21,16 +21,17 @@ public class WahahaTest {
                 .log()
                 .limitRate(1)
                 .flatMap(this::times2)
+                .delaySequence(Duration.ofMillis(1))
                 .subscribe(System.out::println);
         System.out.println(System.currentTimeMillis() - now);
 
-        long start = System.currentTimeMillis();
+        /*long start = System.currentTimeMillis();
         Flux.range(1, 100)
                 .log()
                 .flatMap(this::times2)
                 // .limitRate(1)
                 .subscribe(System.out::println);
-        System.out.println(System.currentTimeMillis() - now);
+        System.out.println(System.currentTimeMillis() - now);*/
     }
 
 
