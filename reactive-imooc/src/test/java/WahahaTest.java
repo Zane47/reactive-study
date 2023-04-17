@@ -3,7 +3,10 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.sql.SQLOutput;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author czhang27@trip.com
@@ -85,6 +88,51 @@ public class WahahaTest {
         System.out.println(System.currentTimeMillis() - now);*/
     }
 
+
+    @Test
+    public void testDelay() {
+        List<Integer> ints = new ArrayList<>();
+        ints.add(1);
+        ints.add(2);
+        ints.add(3);
+        ints.add(4);
+        ints.add(5);
+
+        // ------------------------ Flux ------------------------
+
+        /*Flux.defer(() -> Flux.fromIterable(ints)
+                .delayElements(Duration.ofSeconds(2))
+                .flatMap(i -> {
+                    System.out.println(System.currentTimeMillis());
+                    return Mono.just(i * 2);
+                })).subscribe();*/
+
+        Flux.fromIterable(ints)
+                // .delayElements(Duration.ofSeconds(2))
+                .flatMap(i -> {
+                    System.out.println(System.currentTimeMillis());
+                    return Mono.just(i * 2);
+                })
+                .delaySubscription(Duration.ofSeconds(2))
+                .subscribe();
+
+        // ------------------------ mono.delay -> wrong ------------------------
+        /*for (final Integer num : ints) {
+            Mono.delay(Duration.ofSeconds(1))
+                    .flatMap(i -> {
+                        System.out.println("in: " + System.currentTimeMillis());
+                        return Mono.just(num * 2);
+                    })
+                    .log()
+                    .subscribe();
+
+            System.out.println("out: " + System.currentTimeMillis());
+
+        }*/
+
+
+
+    }
 
 
     private Mono<Integer> times2(int i) {
